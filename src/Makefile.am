@@ -14,6 +14,8 @@ hpguppi_support = hpguppi_params.h \
 		  hpguppi_params.c \
 		  hpguppi_time.h   \
 		  hpguppi_time.c   \
+		  hpguppi_udp.h    \
+		  hpguppi_udp.c    \
 		  polyco_struct.h  \
 		  psrfits.h
 
