@@ -25,8 +25,24 @@ AX_CHECK_HASHPIPE
 
 # Checks for libraries.
 #AC_CHECK_LIB([pthread], [pthread_create])
+AC_CHECK_LIB([m], [cos])
 #AC_CHECK_LIB([rt], [clock_gettime])
 #AC_CHECK_LIB([z], [crc32])
+
+AC_ARG_WITH([libsla],
+            AC_HELP_STRING([--with-libsla=DIR],
+                           [Location of SLA library]),
+            [LIBSLADIR="$withval"],
+            [LIBSLADIR="."])
+
+orig_LDFLAGS="${LDFLAGS}"
+LDFLAGS="${orig_LDFLAGS} -L${LIBSLADIR}"
+AC_CHECK_LIB([sla], [sla_obs_],
+             # Found
+             AC_SUBST(LIBSLADIR,${LIBSLADIR}),
+             # Not found there, error
+             AC_MSG_ERROR([SLA library not found]))
+LDFLAGS="${orig_LDFLAGS}"
 
 ## Checks for header files.
 #AC_CHECK_HEADERS([netdb.h stdint.h stdlib.h string.h sys/socket.h sys/time.h unistd.h zlib.h])
