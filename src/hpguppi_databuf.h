@@ -29,7 +29,7 @@ struct guppi_databuf {
 
 typedef struct hpguppi_input_block {
   char hdr[BLOCK_HDR_SIZE];
-  uint64_t data[BLOCK_DATA_SIZE/sizeof(uint64_t)];
+  char data[BLOCK_DATA_SIZE];
 } hpguppi_input_block_t;
 
 // Used to pad after hashpipe_databuf_t to maintain cache alignment
@@ -108,7 +108,7 @@ static inline char *hpguppi_databuf_header(struct hpguppi_input_databuf *d, int 
     return d->block[block_id].hdr;
 }
 
-static inline uint64_t *hpguppi_databuf_data(struct hpguppi_input_databuf *d, int block_id) {
+static inline char *hpguppi_databuf_data(struct hpguppi_input_databuf *d, int block_id) {
     return d->block[block_id].data;
 }
 
