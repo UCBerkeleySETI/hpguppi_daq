@@ -23,7 +23,7 @@ struct guppi_databuf {
 
 #define CACHE_ALIGNMENT (128)
 
-#define N_INPUT_BLOCKS 24
+#define N_INPUT_BLOCKS 12
 #define BLOCK_HDR_SIZE  (184320)        // in bytes, from guppi_daq_server
 #define BLOCK_DATA_SIZE (128*1024*1024) // in bytes, from guppi_daq_server
 
