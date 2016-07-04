@@ -18,7 +18,7 @@
 #include "hpguppi_databuf.h"
 //#include "fitshead.h"
 
-hashpipe_databuf_t *hpguppi_databuf_create(int instance_id, int databuf_id)
+hashpipe_databuf_t *hpguppi_input_databuf_create(int instance_id, int databuf_id)
 {
     int i;
 
