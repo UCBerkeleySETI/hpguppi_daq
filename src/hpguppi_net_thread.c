@@ -11,26 +11,13 @@
 #include <unistd.h>
 #include <string.h>
 #include <pthread.h>
-#include <signal.h>
-//#include <sched.h>
-//#include <sys/time.h>
-//#include <sys/resource.h>
-//#include <sys/types.h>
-//#include <endian.h>
-//
-//#include "fitshead.h"
-#include "hpguppi_params.h"
-//#include "psrfits.h"
-//#include "hashpipe_error.h"
-//#include "guppi_status.h"
-//#include "guppi_databuf.h"
-#include "hpguppi_udp.h"
-#include "hpguppi_time.h"
 
 #include "hashpipe.h"
-#include "hpguppi_databuf.h"
 
-//#include "guppi_threads.h"
+#include "hpguppi_databuf.h"
+#include "hpguppi_params.h"
+#include "hpguppi_udp.h"
+#include "hpguppi_time.h"
 
 #define PKTSOCK_BYTES_PER_FRAME (16384)
 #define PKTSOCK_FRAMES_PER_BLOCK (8)
