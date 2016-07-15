@@ -11,6 +11,10 @@
 #include <unistd.h>
 #include <string.h>
 #include <pthread.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include "hashpipe.h"
 
@@ -19,15 +23,30 @@
 #include "hpguppi_udp.h"
 #include "hpguppi_time.h"
 
+#define GUPPI_DAQ_CONTROL "/tmp/guppi_daq_control"
+#define MAX_CMD_LEN 1024
+
 #define PKTSOCK_BYTES_PER_FRAME (16384)
 #define PKTSOCK_FRAMES_PER_BLOCK (8)
 #define PKTSOCK_NBLOCKS (800)
 #define PKTSOCK_NFRAMES (PKTSOCK_FRAMES_PER_BLOCK * PKTSOCK_NBLOCKS)
 
+// Define run states.  Currently two run states are defined: IDLE and RECORD.
+//
+// In the IDLE state, incoming packets are dropped.  Transitioning out of the
+// IDLE state will reinitialize the current blocks.
+//
+// In the RECORD state, incoming packets are stored in the current block.  When
+// the current block is "full", it is marked as filled and advanced to the next
+// block.  Transitioning out of the RECORD state changes nothing (partial block
+// will eventually be reinitialized).
+
+enum run_states {IDLE, RECORD};
+
 /* It's easier to just make these global ... */
 static unsigned long long npacket_total=0, ndropped_total=0, nbogus_total=0;
 
-/* Structs/functions to more easily deal with multiple 
+/* Structs/functions to more easily deal with multiple
  * active blocks being filled
  */
 struct datablock_stats {
@@ -55,11 +74,11 @@ void finalize_block(struct datablock_stats *d);
 void block_stack_push(struct datablock_stats *d, int nblock);
 
 /* Go to next block in set */
-void increment_block(struct datablock_stats *d, 
+void increment_block(struct datablock_stats *d,
         unsigned long long next_seq_num);
 
 /* Check whether a certain seq num belongs in the data block */
-int block_packet_check(struct datablock_stats *d, 
+int block_packet_check(struct datablock_stats *d,
         unsigned long long seq_num);
 #endif // 0
 
@@ -78,7 +97,7 @@ void reset_block(struct datablock_stats *d) {
 }
 
 /* Initialize block struct */
-void init_block(struct datablock_stats *d, struct hpguppi_input_databuf *db, 
+void init_block(struct datablock_stats *d, struct hpguppi_input_databuf *db,
         size_t packet_data_size, int packets_per_block, int overlap_packets) {
     d->db = db;
     d->packet_data_size = packet_data_size;
@@ -100,22 +119,22 @@ void finalize_block(struct datablock_stats *d) {
 /* Push all blocks down a level, losing the first one */
 void block_stack_push(struct datablock_stats *d, int nblock) {
     int i;
-    for (i=1; i<nblock; i++) 
+    for (i=1; i<nblock; i++)
         memcpy(&d[i-1], &d[i], sizeof(struct datablock_stats));
 }
 
 /* Go to next block in set */
-void increment_block(struct datablock_stats *d, 
+void increment_block(struct datablock_stats *d,
         unsigned long long next_seq_num) {
     d->block_idx = (d->block_idx + 1) % d->db->header.n_block;
-    d->packet_idx = next_seq_num - (next_seq_num 
+    d->packet_idx = next_seq_num - (next_seq_num
             % (d->packets_per_block - d->overlap_packets));
     reset_stats(d);
     // TODO: wait for block free here?
 }
 
 /* Check whether a certain seq num belongs in the data block */
-int block_packet_check(struct datablock_stats *d, 
+int block_packet_check(struct datablock_stats *d,
         unsigned long long seq_num) {
     if (seq_num < d->packet_idx) return(-1);
     else if (seq_num >= d->packet_idx + d->packets_per_block) return(1);
@@ -126,7 +145,7 @@ int block_packet_check(struct datablock_stats *d,
  * packet.
  */
 unsigned long long hpguppi_pktsock_seq_num(const unsigned char *p_frame) {
-    // XXX Temp for new baseband mode, blank out top 8 bits which 
+    // XXX Temp for new baseband mode, blank out top 8 bits which
     // contain channel info.
     unsigned long long tmp = be64toh(*(uint64_t *)PKT_UDP_DATA(p_frame));
     tmp &= 0x00FFFFFFFFFFFFFF;
@@ -157,7 +176,7 @@ void write_search_packet_to_block_from_pktsock_frame(
     d->npacket++;
 }
 
-/* Write a baseband mode packet into the block.  Includes a 
+/* Write a baseband mode packet into the block.  Includes a
  * corner-turn (aka transpose) of dimension nchan.
  */
 void write_baseband_packet_to_block_from_pktsock_frame(
@@ -188,11 +207,23 @@ void write_baseband_packet_to_block_from_pktsock_frame(
 
 static int init(hashpipe_thread_args_t *args)
 {
-    /* Read network params */
+    /* Network params */
     char bindhost[80];
     int bindport = 60000;
+    /* Other essential paramaters */
+    int directio=1;
+    int nbits=8;
+    int npol=4;
+    double obsbw=187.5;
+    int obsnchan=64;
+    int overlap=0;
+    double tbin=0.0;
+    char pktfmt[80];
+    char obs_mode[80];
 
     strcpy(bindhost, "eth4");
+    strcpy(pktfmt, "1SFA"); // Value for DIBAS packets
+    strcpy(obs_mode, "RAW");
 
     hashpipe_status_t st = args->st;
 
@@ -200,9 +231,29 @@ static int init(hashpipe_thread_args_t *args)
     // Get info from status buffer if present (no change if not present)
     hgets(st.buf, "BINDHOST", 80, bindhost);
     hgeti4(st.buf, "BINDPORT", &bindport);
+    hgeti4(st.buf, "DIRECTIO", &directio);
+    hgeti4(st.buf, "NBITS", &nbits);
+    hgeti4(st.buf, "NPOL", &npol);
+    hgetr8(st.buf, "OBSBW", &obsbw);
+    hgeti4(st.buf, "OBSNCHAN", &obsnchan);
+    hgeti4(st.buf, "OVERLAP", &overlap);
+    hgets(st.buf, "PKTFMT", 80, pktfmt);
+    hgets(st.buf, "OBS_MODE", 80, obs_mode);
+    // Calculate TBIN
+    tbin = 2 * obsnchan / obsbw / 1e6;
     // Store bind host/port info etc in status buffer
     hputs(st.buf, "BINDHOST", bindhost);
     hputi4(st.buf, "BINDPORT", bindport);
+    hputi4(st.buf, "BINDPORT", bindport);
+    hputi4(st.buf, "DIRECTIO", directio);
+    hputi4(st.buf, "NBITS", nbits);
+    hputi4(st.buf, "NPOL", npol);
+    hputr8(st.buf, "OBSBW", obsbw);
+    hputi4(st.buf, "OBSNCHAN", obsnchan);
+    hputi4(st.buf, "OVERLAP", overlap);
+    hputr8(st.buf, "TBIN", tbin);
+    hputs(st.buf, "PKTFMT", pktfmt);
+    hputs(st.buf, "OBS_MODE", obs_mode);
     hashpipe_status_unlock_safe(&st);
 
     /* Set up pktsock */
@@ -245,6 +296,23 @@ static void *run(hashpipe_thread_args_t * args)
     hashpipe_status_t st = args->st;
     const char * status_key = args->thread_desc->skey;
 
+    /* Create FIFO */
+    int rv = mkfifo(GUPPI_DAQ_CONTROL, 0666);
+    if (rv!=0 && errno!=EEXIST) {
+        hashpipe_error("hpguppi_net_thread: Error creating control fifo (%s)",
+                strerror(errno));
+        pthread_exit(NULL);
+    }
+
+    /* Open command FIFO for read */
+    char fifo_cmd[MAX_CMD_LEN];
+    int fifo_fd = open(GUPPI_DAQ_CONTROL, O_RDONLY | O_NONBLOCK);
+    if (fifo_fd<0) {
+        hashpipe_error("hpguppi_net_thread: Error opening control fifo (%s)",
+                strerror(errno));
+        pthread_exit(NULL);
+    }
+
     /* Read in general parameters */
     struct hpguppi_params gp;
     struct psrfits pf;
@@ -276,8 +344,8 @@ static void *run(hashpipe_thread_args_t * args)
     if (use_parkes_packets) {
         printf("hpguppi_net_thread: Using Parkes UDP packet format.\n");
         acclen = gp.decimation_factor;
-        if (acclen==0) { 
-            hashpipe_error("hpguppi_net_thread", 
+        if (acclen==0) {
+            hashpipe_error("hpguppi_net_thread",
                     "ACC_LEN must be set to use Parkes format");
             pthread_exit(NULL);
         }
@@ -289,9 +357,9 @@ static void *run(hashpipe_thread_args_t * args)
      */
     int block_size;
     size_t packet_data_size = hpguppi_udp_packet_datasize(ps_params.packet_size);
-    if (use_parkes_packets) 
+    if (use_parkes_packets)
         packet_data_size = parkes_udp_packet_datasize(ps_params.packet_size);
-    unsigned packets_per_block; 
+    unsigned packets_per_block;
     if (hgeti4(status_buf, "BLOCSIZE", &block_size)==0) {
             block_size = db->header.block_size;
             hputi4(status_buf, "BLOCSIZE", block_size);
@@ -315,10 +383,10 @@ static void *run(hashpipe_thread_args_t * args)
             // XXX This is only true for 8-bit, 2-pol data:
             int samples_per_packet = packet_data_size / nchan / (size_t)4;
             if (overlap_packets % samples_per_packet) {
-                hashpipe_error("hpguppi_net_thread", 
+                hashpipe_error("hpguppi_net_thread",
                         "Overlap is not an integer number of packets");
                 overlap_packets = (overlap_packets/samples_per_packet+1);
-                hputi4(status_buf, "OVERLAP", 
+                hputi4(status_buf, "OVERLAP",
                         overlap_packets*samples_per_packet);
             } else {
                 overlap_packets = overlap_packets/samples_per_packet;
@@ -330,8 +398,8 @@ static void *run(hashpipe_thread_args_t * args)
     unsigned i;
     const int nblock = 2;
     struct datablock_stats blocks[nblock];
-    for (i=0; i<nblock; i++) 
-        init_block(&blocks[i], db, packet_data_size, packets_per_block, 
+    for (i=0; i<nblock; i++)
+        init_block(&blocks[i], db, packet_data_size, packets_per_block,
                 overlap_packets);
 
     /* Convenience names for first/last blocks in set */
@@ -340,7 +408,6 @@ static void *run(hashpipe_thread_args_t * args)
     lblock = &blocks[nblock-1];
 
     /* Misc counters, etc */
-    int rv;
     char *curdata=NULL, *curheader=NULL;
     unsigned long long seq_num, last_seq_num=2048, nextblock_seq_num=0;
     long long seq_num_diff;
@@ -348,6 +415,13 @@ static void *run(hashpipe_thread_args_t * args)
     const double drop_lpf = 0.25;
     int netbuf_full = 0;
     char netbuf_status[128] = {};
+    unsigned force_new_block=0, waiting=-1;
+    enum run_states state = IDLE;
+
+    // Heartbeat variables
+    time_t lasttime = 0;
+    time_t curtime = 0;
+    char timestr[32] = {0};
 
     // Drop all packets to date
     unsigned char *p_frame;
@@ -356,13 +430,24 @@ static void *run(hashpipe_thread_args_t * args)
     }
 
     /* Main loop */
-    unsigned force_new_block=0, waiting=-1;
     while (run_threads()) {
 
         /* Wait for data */
         do {
             p_frame = hashpipe_pktsock_recv_udp_frame(
                 &ps_params.ps, ps_params.port, 1000); // 1 second timeout
+
+            // Heartbeat update?
+            time(&curtime);
+            if(curtime != lasttime) {
+                lasttime = curtime;
+                ctime_r(&curtime, timestr);
+                timestr[strlen(timestr)-1] = '\0'; // Chop off trailing newline
+                hashpipe_status_lock_safe(&st);
+                hputs(st.buf, "DAQPULSE", timestr);
+                hputs(st.buf, "DAQSTATE", state == IDLE ? "stopped" : "running");
+                hashpipe_status_unlock_safe(&st);
+            }
 
             /* Set "waiting" flag */
             if (!p_frame && run_threads() && waiting!=1) {
@@ -379,6 +464,56 @@ static void *run(hashpipe_thread_args_t * args)
             break;
         }
 
+        // Check FIFO for command
+        rv = read(fifo_fd, fifo_cmd, MAX_CMD_LEN-1);
+        if(rv == -1 && errno != EAGAIN) {
+            hashpipe_error("error reading control fifo (%s)",
+                    strerror(errno));
+        } else if(rv > 0) {
+            // Trim newline from command, if any
+            char *newline = strchr(fifo_cmd, '\n');
+            if (newline!=NULL) *newline='\0';
+
+            // Log command
+            hashpipe_warn("got %s command", fifo_cmd);
+
+            // Act on command
+            if(strcasecmp(fifo_cmd, "QUIT") == 0) {
+                // Go to IDLE state
+                state = IDLE;
+                // Hashpipe will exit upon thread exit
+                pthread_exit(NULL);
+            } else if(strcasecmp(fifo_cmd, "MONITOR") == 0) {
+                hashpipe_warn("hpguppi_net_thread",
+                        "MONITOR command not supported, use null_output_thread.");
+            } else if(strcasecmp(fifo_cmd, "START") == 0) {
+                // If leaving the IDLE state
+                if(state == IDLE) {
+                    // Reset current blocks' packet_idx values and stats
+                    for (i=0; i<nblock; i++) {
+                        blocks[i].packet_idx = 0;
+                        reset_stats(&blocks[i]);
+                    }
+                }
+                // Go to RECORD state
+                state = RECORD;
+            } else if(strcasecmp(fifo_cmd, "STOP") == 0) {
+                // Go to IDLE state
+                state = IDLE;
+            } else {
+                hashpipe_error("got unrecognized command '%s'", fifo_cmd);
+            }
+        }
+
+        // If IDLE (not RECORDing), release frame and continue main loop
+        if(state == IDLE) {
+            // Release frame!
+            hashpipe_pktsock_release_frame(p_frame);
+            continue;
+        }
+
+        // FYI: We must be in RECORD state if we get here!
+
         /* Check packet size */
         if(ps_params.packet_size == 0) {
             ps_params.packet_size = PKT_UDP_SIZE(p_frame) - 8;
@@ -393,7 +528,7 @@ static void *run(hashpipe_thread_args_t * args)
             }
             // Release frame!
             hashpipe_pktsock_release_frame(p_frame);
-            continue; 
+            continue;
         }
 
         /* Update status if needed */
@@ -413,11 +548,11 @@ static void *run(hashpipe_thread_args_t * args)
         /* Check seq num diff */
         seq_num = hpguppi_pktsock_seq_num(p_frame);
         seq_num_diff = seq_num - last_seq_num;
-        if (seq_num_diff<=0) { 
+        if (seq_num_diff<=0) {
             if (seq_num_diff<-1024) { force_new_block=1; }
             else if (seq_num_diff==0) {
                 char msg[256];
-                sprintf(msg, "Received duplicate packet (seq_num=%lld)", 
+                sprintf(msg, "Received duplicate packet (seq_num=%lld)",
                         seq_num);
                 hashpipe_warn("hpguppi_net_thread", msg);
             }
@@ -427,8 +562,8 @@ static void *run(hashpipe_thread_args_t * args)
               /* No going backwards */
               continue;
             }
-        } else { 
-            force_new_block=0; 
+        } else {
+            force_new_block=0;
             npacket_total += seq_num_diff;
             ndropped_total += seq_num_diff - 1;
         }
@@ -438,21 +573,21 @@ static void *run(hashpipe_thread_args_t * args)
         if ((seq_num>=nextblock_seq_num) || force_new_block) {
 
             /* Update drop stats */
-            if (fblock->npacket)  
-                drop_frac_avg = (1.0-drop_lpf)*drop_frac_avg 
-                    + drop_lpf * 
-                    (double)fblock->ndropped / 
+            if (fblock->npacket)
+                drop_frac_avg = (1.0-drop_lpf)*drop_frac_avg
+                    + drop_lpf *
+                    (double)fblock->ndropped /
                     (double)fblock->npacket;
 
             hashpipe_status_lock_safe(&st);
-            hputi4(st.buf, "PKTIDX", fblock->packet_idx);                          
+            hputi4(st.buf, "PKTIDX", fblock->packet_idx);
             hputr8(st.buf, "DROPAVG", drop_frac_avg);
-            hputr8(st.buf, "DROPTOT", 
-                    npacket_total ? 
-                    (double)ndropped_total/(double)npacket_total 
+            hputr8(st.buf, "DROPTOT",
+                    npacket_total ?
+                    (double)ndropped_total/(double)npacket_total
                     : 0.0);
-            hputr8(st.buf, "DROPBLK", 
-                    fblock->npacket ? 
+            hputr8(st.buf, "DROPBLK",
+                    fblock->npacket ?
                     (double)fblock->ndropped/(double)fblock->npacket
                     : 0.0);
             hashpipe_status_unlock_safe(&st);
@@ -465,7 +600,7 @@ static void *run(hashpipe_thread_args_t * args)
             increment_block(lblock, seq_num);
             curdata = hpguppi_databuf_data(db, lblock->block_idx);
             curheader = hpguppi_databuf_header(db, lblock->block_idx);
-            nextblock_seq_num = lblock->packet_idx 
+            nextblock_seq_num = lblock->packet_idx
                 + packets_per_block - overlap_packets;
 
             /* If new obs started, reset total counters, get start
@@ -483,9 +618,9 @@ static void *run(hashpipe_thread_args_t * args)
                 /* Get obs start time */
                 get_current_mjd(&stt_imjd, &stt_smjd, &stt_offs);
                 if (stt_offs>0.5) { stt_smjd+=1; stt_offs-=1.0; }
-                if (fabs(stt_offs)>0.1) { 
+                if (fabs(stt_offs)>0.1) {
                     char msg[256];
-                    sprintf(msg, 
+                    sprintf(msg,
                             "Second fraction = %3.1f ms > +/-100 ms",
                             stt_offs*1e3);
                     hashpipe_warn("hpguppi_net_thread", msg);
@@ -502,7 +637,7 @@ static void *run(hashpipe_thread_args_t * args)
 
                 /* Flush any current buffers */
                 for (i=0; i<nblock-1; i++) {
-                    if (blocks[i].block_idx>=0) 
+                    if (blocks[i].block_idx>=0)
                         finalize_block(&blocks[i]);
                     reset_block(&blocks[i]);
                 }
@@ -517,7 +652,7 @@ static void *run(hashpipe_thread_args_t * args)
                 hputr8(st.buf, "STT_OFFS", stt_offs);
                 hputi4(st.buf, "STTVALID", 1);
             } else {
-                // Put a non-accurate start time to avoid polyco 
+                // Put a non-accurate start time to avoid polyco
                 // errors.
                 get_current_mjd(&stt_imjd, &stt_smjd, &stt_offs);
                 hputi4(st.buf, "STT_IMJD", stt_imjd);
@@ -539,7 +674,7 @@ static void *run(hashpipe_thread_args_t * args)
                         block_size = db->header.block_size;
                 } else {
                     if (block_size > db->header.block_size) {
-                        hashpipe_error("hpguppi_net_thread", 
+                        hashpipe_error("hpguppi_net_thread",
                                 "BLOCSIZE > databuf block_size");
                         block_size = db->header.block_size;
                     }
@@ -557,7 +692,7 @@ static void *run(hashpipe_thread_args_t * args)
             hputs(st.buf, status_key, "waitfree");
             hputs(st.buf, "NETBUFST", netbuf_status);
             hashpipe_status_unlock_safe(&st);
-            while ((rv=hpguppi_input_databuf_wait_free(db, lblock->block_idx)) 
+            while ((rv=hpguppi_input_databuf_wait_free(db, lblock->block_idx))
                     != HASHPIPE_OK) {
                 if (rv==HASHPIPE_TIMEOUT) {
                     waiting=1;
@@ -569,7 +704,7 @@ static void *run(hashpipe_thread_args_t * args)
                     hashpipe_status_unlock_safe(&st);
                     continue;
                 } else {
-                    hashpipe_error("hpguppi_net_thread", 
+                    hashpipe_error("hpguppi_net_thread",
                             "error waiting for free databuf");
                     pthread_exit(NULL);
                 }
@@ -585,13 +720,13 @@ static void *run(hashpipe_thread_args_t * args)
         }
 
         /* Copy packet into any blocks where it belongs.
-         * The "write packets" functions also update drop stats 
+         * The "write packets" functions also update drop stats
          * for blocks, etc.
          */
         for (i=0; i<nblock; i++) {
-            if ((blocks[i].block_idx>=0) 
+            if ((blocks[i].block_idx>=0)
                     && (block_packet_check(&blocks[i],seq_num)==0)) {
-                if (baseband_packets) 
+                if (baseband_packets)
                     write_baseband_packet_to_block_from_pktsock_frame(
                         &blocks[i], p_frame, nchan);
                 else
@@ -629,4 +764,4 @@ static __attribute__((constructor)) void ctor()
   register_hashpipe_thread(&net_thread);
 }
 
-// vi: set ts=8 sw=4 noet :
+// vi: set ts=8 sw=4 et :
