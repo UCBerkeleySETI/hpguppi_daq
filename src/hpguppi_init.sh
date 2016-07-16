@@ -49,7 +49,7 @@ function init() {
     -c $outcpu hpguppi_rawdisk_thread
 
   taskset $mask \
-  hashpipe -p hpguppi_gpu -I $instance \
+  hashpipe -p hpguppi_daq -I $instance \
     -o BINDHOST=$bindhost \
     -o BINDPORT=60000 \
     -c $netcpu hpguppi_net_thread \
