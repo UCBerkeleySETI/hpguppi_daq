@@ -44,7 +44,7 @@
 enum run_states {IDLE, RECORD};
 
 /* It's easier to just make these global ... */
-static unsigned long long npacket_total=0, ndropped_total=0, nbogus_total=0;
+static uint64_t npacket_total=0, ndropped_total=0, nbogus_total=0;
 
 /* Structs/functions to more easily deal with multiple
  * active blocks being filled
@@ -52,13 +52,13 @@ static unsigned long long npacket_total=0, ndropped_total=0, nbogus_total=0;
 struct datablock_stats {
     struct hpguppi_input_databuf *db; // Pointer to overall shared mem databuf
     int block_idx;                    // Block index number in databuf
-    unsigned long long packet_idx;    // Index of first packet number in block
+    uint64_t packet_idx;              // Index of first packet number in block
     size_t packet_data_size;          // Data size of each packet
     int packets_per_block;            // Total number of packets to go in the block
     int overlap_packets;              // Overlap between blocks in packets
     int npacket;                      // Number of packets filled so far
     int ndropped;                     // Number of dropped packets so far
-    unsigned long long last_pkt;      // Last packet seq number written to block
+    uint64_t last_pkt;                // Last packet seq number written to block
 };
 
 #if 0
@@ -125,7 +125,7 @@ void block_stack_push(struct datablock_stats *d, int nblock) {
 
 /* Go to next block in set */
 void increment_block(struct datablock_stats *d,
-        unsigned long long next_seq_num) {
+        uint64_t next_seq_num) {
     d->block_idx = (d->block_idx + 1) % d->db->header.n_block;
     d->packet_idx = next_seq_num - (next_seq_num
             % (d->packets_per_block - d->overlap_packets));
@@ -135,7 +135,7 @@ void increment_block(struct datablock_stats *d,
 
 /* Check whether a certain seq num belongs in the data block */
 int block_packet_check(struct datablock_stats *d,
-        unsigned long long seq_num) {
+        uint64_t seq_num) {
     if (seq_num < d->packet_idx) return(-1);
     else if (seq_num >= d->packet_idx + d->packets_per_block) return(1);
     else return(0);
@@ -144,10 +144,10 @@ int block_packet_check(struct datablock_stats *d,
 /* Return packet index from a pktsock frame that is assumed to contain a UDP
  * packet.
  */
-unsigned long long hpguppi_pktsock_seq_num(const unsigned char *p_frame) {
+uint64_t hpguppi_pktsock_seq_num(const unsigned char *p_frame) {
     // XXX Temp for new baseband mode, blank out top 8 bits which
     // contain channel info.
-    unsigned long long tmp = be64toh(*(uint64_t *)PKT_UDP_DATA(p_frame));
+    uint64_t tmp = be64toh(*(uint64_t *)PKT_UDP_DATA(p_frame));
     tmp &= 0x00FFFFFFFFFFFFFF;
     return tmp ;
 }
@@ -157,8 +157,8 @@ unsigned long long hpguppi_pktsock_seq_num(const unsigned char *p_frame) {
  */
 void write_search_packet_to_block_from_pktsock_frame(
         struct datablock_stats *d, unsigned char *p_frame) {
-    const unsigned long long seq_num = hpguppi_pktsock_seq_num(p_frame);
-    int next_pos = seq_num - d->packet_idx;
+    const uint64_t seq_num = hpguppi_pktsock_seq_num(p_frame);
+    int64_t next_pos = seq_num - d->packet_idx;
     int cur_pos=0;
     if (d->last_pkt > d->packet_idx) cur_pos = d->last_pkt - d->packet_idx + 1;
     char *dataptr = hpguppi_databuf_data(d->db, d->block_idx)
@@ -181,8 +181,8 @@ void write_search_packet_to_block_from_pktsock_frame(
  */
 void write_baseband_packet_to_block_from_pktsock_frame(
         struct datablock_stats *d, unsigned char *p_frame, int nchan) {
+    const uint64_t seq_num = hpguppi_pktsock_seq_num(p_frame);
 
-    const unsigned long long seq_num = hpguppi_pktsock_seq_num(p_frame);
     int block_pkt_idx = seq_num - d->packet_idx;
     hpguppi_udp_packet_data_copy_transpose_from_payload(
             hpguppi_databuf_data(d->db, d->block_idx),
@@ -409,8 +409,8 @@ static void *run(hashpipe_thread_args_t * args)
 
     /* Misc counters, etc */
     char *curdata=NULL, *curheader=NULL;
-    unsigned long long seq_num, last_seq_num=2048, nextblock_seq_num=0;
-    long long seq_num_diff;
+    uint64_t seq_num, last_seq_num=2048, nextblock_seq_num=0;
+    int64_t seq_num_diff;
     double drop_frac_avg=0.0;
     const double drop_lpf = 0.25;
     int netbuf_full = 0;
