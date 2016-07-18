@@ -105,11 +105,25 @@ static inline int hpguppi_input_databuf_set_filled(hpguppi_input_databuf_t *d, i
 }
 
 static inline char *hpguppi_databuf_header(struct hpguppi_input_databuf *d, int block_id) {
-    return d->block[block_id].hdr;
+    if(block_id < 0 || d->header.n_block < block_id) {
+        hashpipe_error(__FUNCTION__,
+            "block_id %s out of range [0, %d)",
+            block_id, d->header.n_block);
+        return NULL;
+    } else {
+        return d->block[block_id].hdr;
+    }
 }
 
 static inline char *hpguppi_databuf_data(struct hpguppi_input_databuf *d, int block_id) {
-    return d->block[block_id].data;
+    if(block_id < 0 || d->header.n_block < block_id) {
+        hashpipe_error(__FUNCTION__,
+            "block_id %s out of range [0, %d)",
+            block_id, d->header.n_block);
+        return NULL;
+    } else {
+        return d->block[block_id].data;
+    }
 }
 
 #if 0
