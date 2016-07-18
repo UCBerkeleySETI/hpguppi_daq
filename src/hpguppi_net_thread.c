@@ -603,8 +603,13 @@ static void *run(hashpipe_thread_args_t * args)
             }
         } else {
             force_new_block=0;
-            npacket_total += seq_num_diff;
-            ndropped_total += seq_num_diff - 1;
+            if(npacket_total == 0) {
+                npacket_total = 1;
+                ndropped_total = 0;
+            } else {
+                npacket_total += seq_num_diff;
+                ndropped_total += seq_num_diff - 1;
+            }
         }
         last_seq_num = seq_num;
 
