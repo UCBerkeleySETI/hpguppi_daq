@@ -120,11 +120,11 @@ void hpguppi_read_net_params(char *buf, struct hashpipe_udp_params *u) {
 
 // Read networking parameters for packet sockets.  Same as for UDP sockets,
 // though BINDHOST rather than DATAHOST must be used and it should be a local
-// interface name (e.g. eth4).
+// interface name (e.g. eth4).  Also BINDPORT rather than DATAPORT.
 void hpguppi_read_pktsock_params(char *buf, struct hpguppi_pktsock_params *p)
 {
     get_str("BINDHOST", p->ifname, 80, "eth4");
-    get_int("DATAPORT", p->port, 60000);
+    get_int("BINDPORT", p->port, 60000);
     get_str("PKTFMT", p->packet_format, 32, "1SFA");
     if (strncmp(p->packet_format, "PARKES", 6)==0)
         p->packet_size = 2056;
