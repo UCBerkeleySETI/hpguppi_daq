@@ -337,17 +337,17 @@ static void *run(hashpipe_thread_args_t * args)
     /* Create FIFO */
     int rv = mkfifo(GUPPI_DAQ_CONTROL, 0666);
     if (rv!=0 && errno!=EEXIST) {
-        hashpipe_error("hpguppi_net_thread: Error creating control fifo (%s)",
-                strerror(errno));
+        hashpipe_error("hpguppi_net_thread", "Error creating control fifo");
         pthread_exit(NULL);
+    } else if(errno == EEXIST) {
+        errno = 0;
     }
 
     /* Open command FIFO for read */
     char fifo_cmd[MAX_CMD_LEN];
     int fifo_fd = open(GUPPI_DAQ_CONTROL, O_RDONLY | O_NONBLOCK);
     if (fifo_fd<0) {
-        hashpipe_error("hpguppi_net_thread: Error opening control fifo (%s)",
-                strerror(errno));
+        hashpipe_error("hpguppi_net_thread", "Error opening control fifo)");
         pthread_exit(NULL);
     }
 
@@ -583,12 +583,12 @@ static void *run(hashpipe_thread_args_t * args)
         seq_num = hpguppi_pktsock_seq_num(p_frame);
         seq_num_diff = seq_num - last_seq_num;
         if (seq_num_diff<=0) {
-            if (seq_num_diff<-1024) { force_new_block=1; }
-            else if (seq_num_diff==0) {
-                char msg[256];
-                sprintf(msg, "Received duplicate packet (seq_num=%lld)",
+            if (seq_num_diff<-1024) {
+                force_new_block=1;
+            } else if (seq_num_diff==0) {
+                hashpipe_warn("hpguppi_net_thread",
+                        "Received duplicate packet (seq_num=%lu)",
                         seq_num);
-                hashpipe_warn("hpguppi_net_thread", msg);
             }
             else {
               // Release frame!
@@ -653,20 +653,17 @@ static void *run(hashpipe_thread_args_t * args)
                 get_current_mjd(&stt_imjd, &stt_smjd, &stt_offs);
                 if (stt_offs>0.5) { stt_smjd+=1; stt_offs-=1.0; }
                 if (fabs(stt_offs)>0.1) {
-                    char msg[256];
-                    sprintf(msg,
+                    hashpipe_warn("hpguppi_net_thread",
                             "Second fraction = %3.1f ms > +/-100 ms",
                             stt_offs*1e3);
-                    hashpipe_warn("hpguppi_net_thread", msg);
                 }
                 stt_offs = 0.0;
 
                 /* Warn if 1st packet number is not zero */
                 if (seq_num!=0) {
-                    char msg[256];
-                    sprintf(msg, "First packet number is not 0 (seq_num=%lld)",
+                    hashpipe_warn("hpguppi_net_thread",
+                            "First packet number is not 0 (seq_num=%lld)",
                             seq_num);
-                    hashpipe_warn("hpguppi_net_thread", msg);
                 }
 
                 /* Flush any current buffers */
