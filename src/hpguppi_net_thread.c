@@ -239,22 +239,20 @@ void write_baseband_packet_to_block_from_pktsock_frame(
      */
     if (d->last_pkt < d->packet_idx) d->last_pkt = d->packet_idx;
 
-    if (seq_num == d->last_pkt) {
-        d->npacket++;
-    } else {
+    //if (seq_num == d->last_pkt + 1) {
+    //    d->npacket++;
+    //} else {
+        // Count "dropped" packets as packets and as dropped packets
         d->npacket += seq_num - d->last_pkt;
         d->ndropped += seq_num - d->last_pkt - 1;
-    }
+    //}
 
     d->last_pkt = seq_num;
 }
 
 static int init(hashpipe_thread_args_t *args)
 {
-    /* Network params */
-    char bindhost[80];
-    int bindport = 60000;
-    /* Other essential paramaters */
+    /* Non-network essential paramaters */
     int directio=1;
     int nbits=8;
     int npol=4;
@@ -262,33 +260,37 @@ static int init(hashpipe_thread_args_t *args)
     int obsnchan=64;
     int overlap=0;
     double tbin=0.0;
-    char pktfmt[80];
     char obs_mode[80];
 
-    strcpy(bindhost, "eth4");
-    strcpy(pktfmt, "1SFA"); // Value for DIBAS packets
+    struct hpguppi_pktsock_params *p_psp = (struct hpguppi_pktsock_params *)
+        malloc(sizeof(struct hpguppi_pktsock_params));
+
+    if(!p_psp) {
+        perror(__FUNCTION__);
+        return -1;
+    }
+
     strcpy(obs_mode, "RAW");
 
     hashpipe_status_t st = args->st;
 
     hashpipe_status_lock_safe(&st);
+    // Get network parameters (BINDHOST, BINDPORT, PKTFMT)
+    hpguppi_read_pktsock_params(st.buf, p_psp);
     // Get info from status buffer if present (no change if not present)
-    hgets(st.buf, "BINDHOST", 80, bindhost);
-    hgeti4(st.buf, "BINDPORT", &bindport);
     hgeti4(st.buf, "DIRECTIO", &directio);
     hgeti4(st.buf, "NBITS", &nbits);
     hgeti4(st.buf, "NPOL", &npol);
     hgetr8(st.buf, "OBSBW", &obsbw);
     hgeti4(st.buf, "OBSNCHAN", &obsnchan);
     hgeti4(st.buf, "OVERLAP", &overlap);
-    hgets(st.buf, "PKTFMT", 80, pktfmt);
     hgets(st.buf, "OBS_MODE", 80, obs_mode);
     // Calculate TBIN
     tbin = 2 * obsnchan / obsbw / 1e6;
     // Store bind host/port info etc in status buffer
-    hputs(st.buf, "BINDHOST", bindhost);
-    hputi4(st.buf, "BINDPORT", bindport);
-    hputi4(st.buf, "BINDPORT", bindport);
+    hputs(st.buf, "BINDHOST", p_psp->ifname);
+    hputi4(st.buf, "BINDPORT", p_psp->port);
+    hputs(st.buf, "PKTFMT", p_psp->packet_format);
     hputi4(st.buf, "DIRECTIO", directio);
     hputi4(st.buf, "NBITS", nbits);
     hputi4(st.buf, "NPOL", npol);
@@ -296,37 +298,27 @@ static int init(hashpipe_thread_args_t *args)
     hputi4(st.buf, "OBSNCHAN", obsnchan);
     hputi4(st.buf, "OVERLAP", overlap);
     hputr8(st.buf, "TBIN", tbin);
-    hputs(st.buf, "PKTFMT", pktfmt);
     hputs(st.buf, "OBS_MODE", obs_mode);
     hashpipe_status_unlock_safe(&st);
 
-    /* Set up pktsock */
-    struct hashpipe_pktsock *p_ps = (struct hashpipe_pktsock *)
-        malloc(sizeof(struct hashpipe_pktsock));
-
-    if(!p_ps) {
-        perror(__FUNCTION__);
-        return -1;
-    }
-
-    // Make frame_size be a divisor of block size so that frames will be
-    // contiguous in mapped mempory.  block_size must also be a multiple of
-    // page_size.  Easiest way is to oversize the frames to be 16384 bytes, which
-    // is bigger than we need, but keeps things easy.
-    p_ps->frame_size = PKTSOCK_BYTES_PER_FRAME;
+    // Set up pktsock.  Make frame_size be a divisor of block size so that
+    // frames will be contiguous in mapped mempory.  block_size must also be a
+    // multiple of page_size.  Easiest way is to oversize the frames to be
+    // 16384 bytes, which is bigger than we need, but keeps things easy.
+    p_psp->ps.frame_size = PKTSOCK_BYTES_PER_FRAME;
     // total number of frames
-    p_ps->nframes = PKTSOCK_NFRAMES;
+    p_psp->ps.nframes = PKTSOCK_NFRAMES;
     // number of blocks
-    p_ps->nblocks = PKTSOCK_NBLOCKS;
+    p_psp->ps.nblocks = PKTSOCK_NBLOCKS;
 
-    int rv = hashpipe_pktsock_open(p_ps, bindhost, PACKET_RX_RING);
+    int rv = hashpipe_pktsock_open(&p_psp->ps, p_psp->ifname, PACKET_RX_RING);
     if (rv!=HASHPIPE_OK) {
         hashpipe_error("hpguppi_net_thread", "Error opening pktsock.");
         pthread_exit(NULL);
     }
 
-    // Store packet socket pointer in args
-    args->user_data = p_ps;
+    // Store hpguppi_pktsock_params pointer in args
+    args->user_data = p_psp;
 
     // Success!
     return 0;
@@ -339,6 +331,8 @@ static void *run(hashpipe_thread_args_t * args)
     hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->obuf;
     hashpipe_status_t st = args->st;
     const char * status_key = args->thread_desc->skey;
+    struct hpguppi_pktsock_params *p_ps_params =
+        (struct hpguppi_pktsock_params *)args->user_data;
 
     /* Create FIFO */
     int rv = mkfifo(GUPPI_DAQ_CONTROL, 0666);
@@ -371,10 +365,6 @@ static void *run(hashpipe_thread_args_t * args)
     hpguppi_read_obs_params(status_buf, &gp, &pf);
     pthread_cleanup_push((void *)hpguppi_free_psrfits, &pf);
 
-    /* Read network params */
-    struct hpguppi_pktsock_params ps_params;
-    hpguppi_read_pktsock_params(status_buf, &ps_params);
-
     /* Time parameters */
     int stt_imjd=0, stt_smjd=0;
     double stt_offs=0.0;
@@ -384,7 +374,7 @@ static void *run(hashpipe_thread_args_t * args)
     int nchan=0, npol=0, acclen=0;
     nchan = pf.hdr.nchan;
     npol = pf.hdr.npol;
-    if (strncmp(ps_params.packet_format, "PARKES", 6)==0) { use_parkes_packets=1; }
+    if (strncmp(p_ps_params->packet_format, "PARKES", 6)==0) { use_parkes_packets=1; }
     if (use_parkes_packets) {
         printf("hpguppi_net_thread: Using Parkes UDP packet format.\n");
         acclen = gp.decimation_factor;
@@ -400,10 +390,10 @@ static void *run(hashpipe_thread_args_t * args)
      * recommended.
      */
     int block_size;
-    size_t packet_data_size = hpguppi_udp_packet_datasize(ps_params.packet_size);
+    size_t packet_data_size = hpguppi_udp_packet_datasize(p_ps_params->packet_size);
     if (use_parkes_packets)
-        packet_data_size = parkes_udp_packet_datasize(ps_params.packet_size);
     unsigned packets_per_block;
+        packet_data_size = parkes_udp_packet_datasize(p_ps_params->packet_size);
     if (hgeti4(status_buf, "BLOCSIZE", &block_size)==0) {
             block_size = db->header.block_size;
             hputi4(status_buf, "BLOCSIZE", block_size);
@@ -469,7 +459,7 @@ static void *run(hashpipe_thread_args_t * args)
 
     // Drop all packets to date
     unsigned char *p_frame;
-    while((p_frame=hashpipe_pktsock_recv_frame_nonblock(&ps_params.ps))) {
+    while((p_frame=hashpipe_pktsock_recv_frame_nonblock(&p_ps_params->ps))) {
         hashpipe_pktsock_release_frame(p_frame);
     }
 
@@ -479,7 +469,7 @@ static void *run(hashpipe_thread_args_t * args)
         /* Wait for data */
         do {
             p_frame = hashpipe_pktsock_recv_udp_frame(
-                &ps_params.ps, ps_params.port, 1000); // 1 second timeout
+                &p_ps_params->ps, p_ps_params->port, 1000); // 1 second timeout
 
             // Heartbeat update?
             time(&curtime);
@@ -559,9 +549,9 @@ static void *run(hashpipe_thread_args_t * args)
         // FYI: We must be in RECORD state if we get here!
 
         /* Check packet size */
-        if(ps_params.packet_size == 0) {
-            ps_params.packet_size = PKT_UDP_SIZE(p_frame) - 8;
-        } else if(ps_params.packet_size != PKT_UDP_SIZE(p_frame) - 8) {
+        if(p_ps_params->packet_size == 0) {
+            p_ps_params->packet_size = PKT_UDP_SIZE(p_frame) - 8;
+        } else if(p_ps_params->packet_size != PKT_UDP_SIZE(p_frame) - 8) {
             /* Unexpected packet size, ignore? */
             nbogus_total++;
             if(nbogus_total % 1000000 == 0) {
