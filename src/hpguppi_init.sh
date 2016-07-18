@@ -46,7 +46,7 @@ function init() {
     -o BINDHOST=$bindhost \
     -o BINDPORT=60000 \
     -c $netcpu hpguppi_net_thread \
-    -c $outcpu hpguppi_rawdisk_thread
+    -c $outcpu $out_thread
 
   taskset $mask \
   hashpipe -p hpguppi_daq -I $instance \
@@ -69,9 +69,11 @@ out_thread=hpguppi_rawdisk_thread
 
 if echo "$1" | grep -q 'thread'
 then
-  out_thread = "$1"
+  out_thread="$1"
   shift
 fi
+
+echo using out_thread $out_thread
 
 for instidx in "$@"
 do
