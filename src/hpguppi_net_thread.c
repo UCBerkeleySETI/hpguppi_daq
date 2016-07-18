@@ -191,10 +191,13 @@ void write_search_packet_to_block_from_pktsock_frame(
     }
 
     int64_t next_pos = seq_num - d->packet_idx;
+
+    // Fill in from cur_pos to next_pos with zeros
+    // (not robust to out of order packet arrival)
     int cur_pos=0;
     if (d->last_pkt > d->packet_idx) cur_pos = d->last_pkt - d->packet_idx + 1;
     char *dataptr = hpguppi_databuf_data(d->db, d->block_idx)
-        + cur_pos*d->packet_data_size;
+        + (cur_pos*d->packet_data_size % BLOCK_DATA_SIZE);
     for (; cur_pos<next_pos; cur_pos++) {
         memset(dataptr, 0, d->packet_data_size);
         dataptr += d->packet_data_size;
@@ -204,7 +207,6 @@ void write_search_packet_to_block_from_pktsock_frame(
     hpguppi_udp_packet_data_copy_from_payload(dataptr,
         (char *)PKT_UDP_DATA(p_frame), (size_t)PKT_UDP_SIZE(p_frame));
     d->last_pkt = seq_num;
-    //d->packet_idx++; // XXX I think this is wrong..
     d->npacket++;
 }
 
@@ -253,6 +255,7 @@ void write_baseband_packet_to_block_from_pktsock_frame(
 static int init(hashpipe_thread_args_t *args)
 {
     /* Non-network essential paramaters */
+    int blocsize=BLOCK_DATA_SIZE;
     int directio=1;
     int nbits=8;
     int npol=4;
@@ -278,6 +281,7 @@ static int init(hashpipe_thread_args_t *args)
     // Get network parameters (BINDHOST, BINDPORT, PKTFMT)
     hpguppi_read_pktsock_params(st.buf, p_psp);
     // Get info from status buffer if present (no change if not present)
+    hgeti4(st.buf, "BLOCSIZE", &blocsize);
     hgeti4(st.buf, "DIRECTIO", &directio);
     hgeti4(st.buf, "NBITS", &nbits);
     hgeti4(st.buf, "NPOL", &npol);
@@ -291,6 +295,7 @@ static int init(hashpipe_thread_args_t *args)
     hputs(st.buf, "BINDHOST", p_psp->ifname);
     hputi4(st.buf, "BINDPORT", p_psp->port);
     hputs(st.buf, "PKTFMT", p_psp->packet_format);
+    hputi4(st.buf, "BLOCSIZE", blocsize);
     hputi4(st.buf, "DIRECTIO", directio);
     hputi4(st.buf, "NBITS", nbits);
     hputi4(st.buf, "NPOL", npol);
@@ -389,22 +394,21 @@ static void *run(hashpipe_thread_args_t * args)
      * per block, etc.  Changing packet size during an obs is not
      * recommended.
      */
-    int block_size;
+    int block_size = BLOCK_DATA_SIZE;
     size_t packet_data_size = hpguppi_udp_packet_datasize(p_ps_params->packet_size);
     if (use_parkes_packets)
-    unsigned packets_per_block;
         packet_data_size = parkes_udp_packet_datasize(p_ps_params->packet_size);
     if (hgeti4(status_buf, "BLOCSIZE", &block_size)==0) {
-            block_size = db->header.block_size;
+            block_size = BLOCK_DATA_SIZE;
             hputi4(status_buf, "BLOCSIZE", block_size);
     } else {
-        if (block_size > db->header.block_size) {
+        if (block_size > BLOCK_DATA_SIZE) {
             hashpipe_error("hpguppi_net_thread", "BLOCSIZE > databuf block_size");
-            block_size = db->header.block_size;
+            block_size = BLOCK_DATA_SIZE;
             hputi4(status_buf, "BLOCSIZE", block_size);
         }
     }
-    packets_per_block = block_size / packet_data_size;
+    unsigned packets_per_block = block_size / packet_data_size;
 
     /* If we're in baseband mode, figure out how much to overlap
      * the data blocks.
@@ -632,7 +636,9 @@ static void *run(hashpipe_thread_args_t * args)
              */
             if (fblock->block_idx>=0) finalize_block(fblock);
             block_stack_push(blocks, nblock);
+
             increment_block(lblock, seq_num);
+
             curdata = hpguppi_databuf_data(db, lblock->block_idx);
             curheader = hpguppi_databuf_header(db, lblock->block_idx);
             nextblock_seq_num = lblock->packet_idx
@@ -644,7 +650,6 @@ static void *run(hashpipe_thread_args_t * args)
              * than 100ms.  Any current blocks on the stack
              * are also finalized/reset */
             if (force_new_block) {
-
                 /* Reset stats */
                 npacket_total=0;
                 ndropped_total=0;
@@ -703,12 +708,12 @@ static void *run(hashpipe_thread_args_t * args)
              */
             if (force_new_block) {
                 if (hgeti4(status_buf, "BLOCSIZE", &block_size)==0) {
-                        block_size = db->header.block_size;
+                        block_size = BLOCK_DATA_SIZE;
                 } else {
-                    if (block_size > db->header.block_size) {
+                    if (block_size > BLOCK_DATA_SIZE) {
                         hashpipe_error("hpguppi_net_thread",
                                 "BLOCSIZE > databuf block_size");
-                        block_size = db->header.block_size;
+                        block_size = BLOCK_DATA_SIZE;
                     }
                 }
                 packets_per_block = block_size / packet_data_size;
@@ -748,7 +753,6 @@ static void *run(hashpipe_thread_args_t * args)
             memcpy(curheader, status_buf, HASHPIPE_STATUS_TOTAL_SIZE);
             //if (baseband_packets) { memset(curdata, 0, block_size); }
             if (1) { memset(curdata, 0, block_size); }
-
         }
 
         /* Copy packet into any blocks where it belongs.
