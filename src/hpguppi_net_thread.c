@@ -23,7 +23,7 @@
 #include "hpguppi_udp.h"
 #include "hpguppi_time.h"
 
-#define GUPPI_DAQ_CONTROL "/tmp/guppi_daq_control"
+#define HPGUPPI_DAQ_CONTROL "/tmp/hpguppi_daq_control"
 #define MAX_CMD_LEN 1024
 
 #define PKTSOCK_BYTES_PER_FRAME (16384)
@@ -264,6 +264,25 @@ static int init(hashpipe_thread_args_t *args)
     int overlap=0;
     double tbin=0.0;
     char obs_mode[80];
+    char fifo_name[PATH_MAX];
+
+    /* Create control FIFO (/tmp/hpguppi_daq_control/$inst_id) */
+    int rv = mkdir(HPGUPPI_DAQ_CONTROL, 0777);
+    if (rv!=0 && errno!=EEXIST) {
+        hashpipe_error("hpguppi_net_thread", "Error creating control fifo directory");
+        return HASHPIPE_ERR_SYS;
+    } else if(errno == EEXIST) {
+        errno = 0;
+    }
+
+    sprintf(fifo_name, "%s/%d", HPGUPPI_DAQ_CONTROL, args->instance_id);
+    rv = mkfifo(fifo_name, 0666);
+    if (rv!=0 && errno!=EEXIST) {
+        hashpipe_error("hpguppi_net_thread", "Error creating control fifo");
+        return HASHPIPE_ERR_SYS;
+    } else if(errno == EEXIST) {
+        errno = 0;
+    }
 
     struct hpguppi_pktsock_params *p_psp = (struct hpguppi_pktsock_params *)
         malloc(sizeof(struct hpguppi_pktsock_params));
@@ -316,7 +335,7 @@ static int init(hashpipe_thread_args_t *args)
     // number of blocks
     p_psp->ps.nblocks = PKTSOCK_NBLOCKS;
 
-    int rv = hashpipe_pktsock_open(&p_psp->ps, p_psp->ifname, PACKET_RX_RING);
+    rv = hashpipe_pktsock_open(&p_psp->ps, p_psp->ifname, PACKET_RX_RING);
     if (rv!=HASHPIPE_OK) {
         hashpipe_error("hpguppi_net_thread", "Error opening pktsock.");
         pthread_exit(NULL);
@@ -339,18 +358,11 @@ static void *run(hashpipe_thread_args_t * args)
     struct hpguppi_pktsock_params *p_ps_params =
         (struct hpguppi_pktsock_params *)args->user_data;
 
-    /* Create FIFO */
-    int rv = mkfifo(GUPPI_DAQ_CONTROL, 0666);
-    if (rv!=0 && errno!=EEXIST) {
-        hashpipe_error("hpguppi_net_thread", "Error creating control fifo");
-        pthread_exit(NULL);
-    } else if(errno == EEXIST) {
-        errno = 0;
-    }
-
     /* Open command FIFO for read */
+    char fifo_name[PATH_MAX];
     char fifo_cmd[MAX_CMD_LEN];
-    int fifo_fd = open(GUPPI_DAQ_CONTROL, O_RDONLY | O_NONBLOCK);
+    sprintf(fifo_name, "%s/%d", HPGUPPI_DAQ_CONTROL, args->instance_id);
+    int fifo_fd = open(fifo_name, O_RDONLY | O_NONBLOCK);
     if (fifo_fd<0) {
         hashpipe_error("hpguppi_net_thread", "Error opening control fifo)");
         pthread_exit(NULL);
@@ -446,6 +458,7 @@ static void *run(hashpipe_thread_args_t * args)
     lblock = &blocks[nblock-1];
 
     /* Misc counters, etc */
+    int rv;
     char *curdata=NULL, *curheader=NULL;
     uint64_t seq_num, last_seq_num=2048, nextblock_seq_num=0;
     int64_t seq_num_diff;
