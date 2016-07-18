@@ -490,53 +490,54 @@ static void *run(hashpipe_thread_args_t * args)
                 hashpipe_status_unlock_safe(&st);
                 waiting=1;
             }
+
+            // Check FIFO for command
+            rv = read(fifo_fd, fifo_cmd, MAX_CMD_LEN-1);
+            if(rv == -1 && errno != EAGAIN) {
+                hashpipe_error("hpguppi_net_thread", "error reading control fifo)");
+            } else if(rv > 0) {
+                // Trim newline from command, if any
+                char *newline = strchr(fifo_cmd, '\n');
+                if (newline!=NULL) *newline='\0';
+
+                // Log command
+                hashpipe_warn("hpguppi_net_thread", "got %s command", fifo_cmd);
+
+                // Act on command
+                if(strcasecmp(fifo_cmd, "QUIT") == 0) {
+                    // Go to IDLE state
+                    state = IDLE;
+                    // Hashpipe will exit upon thread exit
+                    pthread_exit(NULL);
+                } else if(strcasecmp(fifo_cmd, "MONITOR") == 0) {
+                    hashpipe_warn("hpguppi_net_thread",
+                            "MONITOR command not supported, use null_output_thread.");
+                } else if(strcasecmp(fifo_cmd, "START") == 0) {
+                    // If leaving the IDLE state
+                    if(state == IDLE) {
+                        // Reset current blocks' packet_idx values and stats
+                        for (i=0; i<nblock; i++) {
+                            blocks[i].packet_idx = 0;
+                            reset_stats(&blocks[i]);
+                        }
+                    }
+                    // Go to RECORD state
+                    state = RECORD;
+                } else if(strcasecmp(fifo_cmd, "STOP") == 0) {
+                    // Go to IDLE state
+                    state = IDLE;
+                } else {
+                    hashpipe_error("hpguppi_net_thread",
+                            "got unrecognized command '%s'", fifo_cmd);
+                }
+            }
+
         } while (!p_frame && run_threads());
 
         if(!run_threads()) {
             // We're outta here!
             hashpipe_pktsock_release_frame(p_frame);
             break;
-        }
-
-        // Check FIFO for command
-        rv = read(fifo_fd, fifo_cmd, MAX_CMD_LEN-1);
-        if(rv == -1 && errno != EAGAIN) {
-            hashpipe_error("error reading control fifo (%s)",
-                    strerror(errno));
-        } else if(rv > 0) {
-            // Trim newline from command, if any
-            char *newline = strchr(fifo_cmd, '\n');
-            if (newline!=NULL) *newline='\0';
-
-            // Log command
-            hashpipe_warn("got %s command", fifo_cmd);
-
-            // Act on command
-            if(strcasecmp(fifo_cmd, "QUIT") == 0) {
-                // Go to IDLE state
-                state = IDLE;
-                // Hashpipe will exit upon thread exit
-                pthread_exit(NULL);
-            } else if(strcasecmp(fifo_cmd, "MONITOR") == 0) {
-                hashpipe_warn("hpguppi_net_thread",
-                        "MONITOR command not supported, use null_output_thread.");
-            } else if(strcasecmp(fifo_cmd, "START") == 0) {
-                // If leaving the IDLE state
-                if(state == IDLE) {
-                    // Reset current blocks' packet_idx values and stats
-                    for (i=0; i<nblock; i++) {
-                        blocks[i].packet_idx = 0;
-                        reset_stats(&blocks[i]);
-                    }
-                }
-                // Go to RECORD state
-                state = RECORD;
-            } else if(strcasecmp(fifo_cmd, "STOP") == 0) {
-                // Go to IDLE state
-                state = IDLE;
-            } else {
-                hashpipe_error("got unrecognized command '%s'", fifo_cmd);
-            }
         }
 
         // If IDLE (not RECORDing), release frame and continue main loop
