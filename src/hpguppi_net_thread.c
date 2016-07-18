@@ -83,14 +83,16 @@ int block_packet_check(struct datablock_stats *d,
 #endif // 0
 
 /* Reset all counters */
-void reset_stats(struct datablock_stats *d) {
+void reset_stats(struct datablock_stats *d)
+{
     d->npacket=0;
     d->ndropped=0;
     d->last_pkt=0;
 }
 
 /* Reset block params */
-void reset_block(struct datablock_stats *d) {
+void reset_block(struct datablock_stats *d)
+{
     d->block_idx = -1;
     d->packet_idx = 0;
     reset_stats(d);
@@ -107,7 +109,12 @@ void init_block(struct datablock_stats *d, struct hpguppi_input_databuf *db,
 }
 
 /* Update block header info, set filled status */
-void finalize_block(struct datablock_stats *d) {
+void finalize_block(struct datablock_stats *d)
+{
+    if(d->block_idx < 0) {
+        hashpipe_error(__FUNCTION__, "d->block_idx == %d", d->block_idx);
+        pthread_exit(NULL);
+    }
     char *header = hpguppi_databuf_header(d->db, d->block_idx);
     hputi4(header, "PKTIDX", d->packet_idx);
     hputi4(header, "PKTSIZE", d->packet_data_size);
@@ -117,7 +124,8 @@ void finalize_block(struct datablock_stats *d) {
 }
 
 /* Push all blocks down a level, losing the first one */
-void block_stack_push(struct datablock_stats *d, int nblock) {
+void block_stack_push(struct datablock_stats *d, int nblock)
+{
     int i;
     for (i=1; i<nblock; i++)
         memcpy(&d[i-1], &d[i], sizeof(struct datablock_stats));
@@ -125,7 +133,16 @@ void block_stack_push(struct datablock_stats *d, int nblock) {
 
 /* Go to next block in set */
 void increment_block(struct datablock_stats *d,
-        uint64_t next_seq_num) {
+        uint64_t next_seq_num)
+{
+    if(d->block_idx < 0) {
+        hashpipe_warn(__FUNCTION__, "d->block_idx == %d", d->block_idx);
+    }
+    if(d->db->header.n_block < 1) {
+        hashpipe_error(__FUNCTION__, "d->db->header.n_block == %d", d->db->header.n_block);
+        pthread_exit(NULL);
+    }
+
     d->block_idx = (d->block_idx + 1) % d->db->header.n_block;
     d->packet_idx = next_seq_num - (next_seq_num
             % (d->packets_per_block - d->overlap_packets));
@@ -135,7 +152,8 @@ void increment_block(struct datablock_stats *d,
 
 /* Check whether a certain seq num belongs in the data block */
 int block_packet_check(struct datablock_stats *d,
-        uint64_t seq_num) {
+        uint64_t seq_num)
+{
     if (seq_num < d->packet_idx) return(-1);
     else if (seq_num >= d->packet_idx + d->packets_per_block) return(1);
     else return(0);
@@ -144,7 +162,8 @@ int block_packet_check(struct datablock_stats *d,
 /* Return packet index from a pktsock frame that is assumed to contain a UDP
  * packet.
  */
-uint64_t hpguppi_pktsock_seq_num(const unsigned char *p_frame) {
+uint64_t hpguppi_pktsock_seq_num(const unsigned char *p_frame)
+{
     // XXX Temp for new baseband mode, blank out top 8 bits which
     // contain channel info.
     uint64_t tmp = be64toh(*(uint64_t *)PKT_UDP_DATA(p_frame));
@@ -156,8 +175,21 @@ uint64_t hpguppi_pktsock_seq_num(const unsigned char *p_frame) {
  * datablock.  Also zeroes out any dropped packets.
  */
 void write_search_packet_to_block_from_pktsock_frame(
-        struct datablock_stats *d, unsigned char *p_frame) {
+        struct datablock_stats *d, unsigned char *p_frame)
+{
+    if(d->block_idx < 0) {
+        hashpipe_error(__FUNCTION__, "d->block_idx == %d", d->block_idx);
+        return;
+    }
+
     const uint64_t seq_num = hpguppi_pktsock_seq_num(p_frame);
+    if(block_packet_check(d, seq_num) != 0) {
+        hashpipe_error("hpguppi_net_thread",
+                "seq_num %lld does not belong in block %d (%lld[+%d])",
+                seq_num, d->block_idx, d->packet_idx, d->packets_per_block);
+        return;
+    }
+
     int64_t next_pos = seq_num - d->packet_idx;
     int cur_pos=0;
     if (d->last_pkt > d->packet_idx) cur_pos = d->last_pkt - d->packet_idx + 1;
@@ -180,8 +212,20 @@ void write_search_packet_to_block_from_pktsock_frame(
  * corner-turn (aka transpose) of dimension nchan.
  */
 void write_baseband_packet_to_block_from_pktsock_frame(
-        struct datablock_stats *d, unsigned char *p_frame, int nchan) {
+        struct datablock_stats *d, unsigned char *p_frame, int nchan)
+{
+    if(d->block_idx < 0) {
+        hashpipe_error(__FUNCTION__, "d->block_idx == %d", d->block_idx);
+        return;
+    }
+
     const uint64_t seq_num = hpguppi_pktsock_seq_num(p_frame);
+    if(block_packet_check(d, seq_num) != 0) {
+        hashpipe_error("hpguppi_net_thread",
+                "seq_num %lld does not belong in block %d (%lld[+%d])",
+                seq_num, d->block_idx, d->packet_idx, d->packets_per_block);
+        return;
+    }
 
     int block_pkt_idx = seq_num - d->packet_idx;
     hpguppi_udp_packet_data_copy_transpose_from_payload(
