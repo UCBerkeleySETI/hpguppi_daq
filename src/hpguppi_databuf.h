@@ -21,10 +21,12 @@ struct guppi_databuf {
 };
 #endif
 
-#define CACHE_ALIGNMENT (128)
+// Technically we only need to align to 512 bytes,
+// but this keeps things 4K (i.e. page) aligned.
+#define ALIGNMENT_SIZE (4096)
 
 #define N_INPUT_BLOCKS 12
-#define BLOCK_HDR_SIZE  (184320)        // in bytes, from guppi_daq_server
+#define BLOCK_HDR_SIZE  (5*80*512)      // in bytes, from guppi_daq_server
 #define BLOCK_DATA_SIZE (128*1024*1024) // in bytes, from guppi_daq_server
 
 typedef struct hpguppi_input_block {
@@ -32,14 +34,14 @@ typedef struct hpguppi_input_block {
   char data[BLOCK_DATA_SIZE];
 } hpguppi_input_block_t;
 
-// Used to pad after hashpipe_databuf_t to maintain cache alignment
-typedef uint8_t hashpipe_databuf_cache_alignment[
-  CACHE_ALIGNMENT - (sizeof(hashpipe_databuf_t)%CACHE_ALIGNMENT)
+// Used to pad after hashpipe_databuf_t to maintain data alignment
+typedef uint8_t hashpipe_databuf_alignment[
+  ALIGNMENT_SIZE - (sizeof(hashpipe_databuf_t)%ALIGNMENT_SIZE)
 ];
 
 typedef struct hpguppi_input_databuf {
   hashpipe_databuf_t header;
-  hashpipe_databuf_cache_alignment padding; // Maintain cache alignment
+  hashpipe_databuf_alignment padding; // Maintain data alignment
   hpguppi_input_block_t block[N_INPUT_BLOCKS];
 } hpguppi_input_databuf_t;
 
