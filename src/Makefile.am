@@ -33,6 +33,9 @@ hpguppi_daq_la_LDFLAGS += -L"@LIBSLADIR@" -Wl,-rpath,"@LIBSLADIR@"
 hpguppi_daq_la_LDFLAGS += -L"@HASHPIPE_LIBDIR@" -Wl,-rpath,"@HASHPIPE_LIBDIR@"
 
 # Installed scripts
-dist_bin_SCRIPTS = hpguppi_init.sh
+dist_bin_SCRIPTS = hpguppi_gbtstatus_loop.rb \
+		   hpguppi_init.sh           \
+		   kill_hpguppi.sh           \
+		   start_hpguppi.sh
 
 # vi: set ts=8 noet :
