@@ -34,17 +34,38 @@
 #define ELAPSED_NS(start,stop) \
   (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
 
-// Define run states.  Currently two run states are defined: IDLE and RECORD.
+// Define run states.  Currently three run states are defined: IDLE, ARMED, and
+// RECORD.
 //
 // In the IDLE state, incoming packets are dropped.  Transitioning out of the
-// IDLE state will reinitialize the current blocks.
+// IDLE state will reinitialize the current blocks.  A "start" command will
+// transition the state from IDLE to ARMED.
+//
+// In the ARMED state, incoming packets are dropped until receiving a packet
+// with a sequence number between the PKTIDX0 sequence number and PKTIDX0+64.
+// PKTIDX0 is taken from the status buffer (defaulting to 0 if not present).
+// Ideally, data taking will start at exactly PKTIDX0, but a range of starting
+// sequence numbers is used to allow for missing up to a few packets at
+// startup.  If receiving a packet with sequence number between 64 and 2**20,
+// assume that we missed the first 64 packets.  Sequence numbers larger than
+// that are assumed to be a continuation of the previous arming and are
+// silently dropped.
+//
+// TODO The 2**20 limit should probably be the number of packets per data
+//      block.
+//
+// Once a packet in the 0..63 range is received, the state transitions to
+// RECORD.
 //
 // In the RECORD state, incoming packets are stored in the current block.  When
 // the current block is "full", it is marked as filled and advanced to the next
 // block.  Transitioning out of the RECORD state changes nothing (partial block
 // will eventually be reinitialized).
 
-enum run_states {IDLE, RECORD};
+enum run_states {IDLE, ARMED, RECORD};
+
+static const uint64_t START_OK_MARGIN   =      64;
+static const uint64_t START_LATE_MARGIN = (1<<20);
 
 /* It's easier to just make these global ... */
 static uint64_t npacket_total=0, ndropped_total=0, nbogus_total=0;
@@ -475,7 +496,7 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
     /* Misc counters, etc */
     int rv;
     char *curdata=NULL, *curheader=NULL;
-    uint64_t seq_num, last_seq_num=2048, nextblock_seq_num=0;
+    uint64_t start_seq_num=0, seq_num, last_seq_num=2048, nextblock_seq_num=0;
     int64_t seq_num_diff;
     double drop_frac_avg=0.0;
     const double drop_lpf = 0.25;
@@ -563,7 +584,8 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                 timestr[strlen(timestr)-1] = '\0'; // Chop off trailing newline
                 hashpipe_status_lock_safe(&st);
                 hputs(st.buf, "DAQPULSE", timestr);
-                hputs(st.buf, "DAQSTATE", state == IDLE ? "stopped" : "running");
+                hputs(st.buf, "DAQSTATE", state == IDLE  ? "stopped" :
+                                          state == ARMED ? "armed"   : "running");
                 hashpipe_status_unlock_safe(&st);
             }
 
@@ -597,16 +619,22 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                     hashpipe_warn("hpguppi_net_thread",
                             "MONITOR command not supported, use null_output_thread.");
                 } else if(strcasecmp(fifo_cmd, "START") == 0) {
-                    // If leaving the IDLE state
-                    if(state == IDLE) {
+                    // If in the IDLE or ARMED states
+                    // (START in RECORD state is a no-op)
+                    if(state == IDLE || state == ARMED) {
                         // Reset current blocks' packet_idx values and stats
                         for (i=0; i<nblock; i++) {
                             blocks[i].packet_idx = 0;
                             reset_stats(&blocks[i]);
                         }
+                        // Get PKTIDX0 from status buffer if present (no change if not present)
+                        hashpipe_status_lock_safe(&st);
+                        hgeti8(st.buf, "PKTIDX0", (long long int *)&start_seq_num);
+                        hashpipe_status_unlock_safe(&st);
+
+                        // Go to (or stay in) ARMED state
+                        state = ARMED;
                     }
-                    // Go to RECORD state
-                    state = RECORD;
                 } else if(strcasecmp(fifo_cmd, "STOP") == 0) {
                     // Go to IDLE state
                     state = IDLE;
@@ -624,14 +652,12 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
             break;
         }
 
-        // If IDLE (not RECORDing), release frame and continue main loop
+        // If IDLE, release frame and continue main loop
         if(state == IDLE) {
             // Release frame!
             if(!fake) hashpipe_pktsock_release_frame(p_frame);
             continue;
         }
-
-        // FYI: We must be in RECORD state if we get here!
 
         /* Check packet size */
         if(p_ps_params->packet_size == 0) {
@@ -650,6 +676,43 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
             continue;
         }
 
+        // Get packet's sequence number
+        seq_num = hpguppi_pktsock_seq_num(p_frame);
+
+        // If ARMED, check sequence number
+        if(state == ARMED) {
+            if(start_seq_num <= seq_num && seq_num < start_seq_num + START_OK_MARGIN) {
+                // OK, we got a startable packet!
+                // Warn if seq_num is not exactly start_seq_num
+                if(seq_num != start_seq_num) {
+                    hashpipe_warn("hpguppi_net_thread",
+                            "first packet number is not %lu (seq_num = %lu)",
+                            start_seq_num, seq_num);
+                }
+                // Go to RECORD state
+                state = RECORD;
+            } else {
+                // Not a startable packet!
+                // Handle late starts (i.e. "low" sequence offset, but not so
+                // low enough to be a startable packet) differently from
+                // packets with "high" sequence offset, which are assumed to be
+                // left over from a previous arming.
+                if (seq_num < start_seq_num + START_LATE_MARGIN) {
+                    hashpipe_warn("hpguppi_net_thread",
+                            "late start detected (seq_num = %lu), returning to idle", seq_num);
+
+                    // Go to IDLE state
+                    state = IDLE;
+                }
+
+                // Release frame!
+                hashpipe_pktsock_release_frame(p_frame);
+                continue;
+            }
+        }
+
+        // FYI: We must be in RECORD state if we get here!
+
         /* Update status if needed */
         if (waiting!=0) {
             hashpipe_status_lock_safe(&st);
@@ -665,7 +728,6 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
         }
 
         /* Check seq num diff */
-        seq_num = hpguppi_pktsock_seq_num(p_frame);
         seq_num_diff = seq_num - last_seq_num;
         if (seq_num_diff<=0) {
             if (seq_num_diff<-1024) {
