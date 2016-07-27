@@ -16,22 +16,24 @@ instances=(
   # ---- ---- ----
   # 1111 1000 0000 = 0xf80
   #
-  #       bind  NET  OUT
-  # mask  host  CPU  CPU
-  "0xf80  eth4   7    8"  # Instance 0, eth4
-  "0xf80  eth5   9   10"  # Instance 1, eth5
+  #                bind  NET  OUT
+  #  dir     mask  host  CPU  CPU
+  "/datax   0xf80  eth4   7    8"  # Instance 0, eth4
+  "/datax2  0xf80  eth5   9   10"  # Instance 1, eth5
 )
 
 function init() {
   instance=$1
-  mask=$2
-  bindhost=$3
-  netcpu=$4
-  outcpu=$5
+  dir=$2
+  mask=$3
+  bindhost=$4
+  netcpu=$5
+  outcpu=$6
+  shift 6
 
-  if [ -z "${mask}" ]
+  if [ -z "${dir}" ]
   then
-    echo "Invalid instance number '${instance}' (ignored)"
+    echo "Invalid instance number '${instance:-[unspecified]}' (ignored)"
     return 1
   fi
 
@@ -41,10 +43,17 @@ function init() {
     return 1
   fi
 
+  if ! cd "${dir}"
+  then
+    echo "Invalid working directory ${dir} (ignored)"
+    return 1
+  fi
+
   echo taskset $mask \
   hashpipe -p hpguppi_daq -I $instance \
     -o BINDHOST=$bindhost \
     -o BINDPORT=60000 \
+    ${@} \
     -c $netcpu hpguppi_net_thread \
     -c $outcpu $out_thread
 
@@ -52,6 +61,7 @@ function init() {
   hashpipe -p hpguppi_daq -I $instance \
     -o BINDHOST=$bindhost \
     -o BINDPORT=60000 \
+    ${@} \
     -c $netcpu $net_thread \
     -c $outcpu $out_thread \
      < /dev/null \
@@ -86,17 +96,29 @@ fi
 echo using net_thread $net_thread
 echo using out_thread $out_thread
 
-for instidx in "$@"
+instance_ids=''
+
+while [ -n "$1" ]
+do
+  # Break on first option character
+  case $1 in
+    -*) break;;
+  esac
+
+  instance_ids="${instance_ids} ${1}"
+  shift
+done
+
+for instidx in $instance_ids
 do
   args="${instances[$instidx]}"
   if [ -n "${args}" ]
   then
-    echo
     echo Starting instance $hostname/$instidx
-    init $instidx $args
-    echo Instance $hostname/$instidx pid $!
-    # Sleep to let instance come up
-    sleep 5
+    if init $instidx $args "${@}"
+    then
+      echo Instance $hostname/$instidx pid $!
+    fi
   else
     echo Instance $instidx not defined for host $hostname
   fi
