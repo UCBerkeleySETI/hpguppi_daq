@@ -52,7 +52,7 @@ function init() {
   hashpipe -p hpguppi_daq -I $instance \
     -o BINDHOST=$bindhost \
     -o BINDPORT=60000 \
-    -c $netcpu hpguppi_net_thread \
+    -c $netcpu $net_thread \
     -c $outcpu $out_thread \
      < /dev/null \
     1> ${hostname}.$instance.out \
@@ -65,14 +65,25 @@ then
   exit 1
 fi
 
+net_thread=hpguppi_net_thread
 out_thread=hpguppi_rawdisk_thread
 
-if echo "$1" | grep -q 'thread'
+if [ "$1" = 'fakefake' ]
+then
+  net_thread=hpguppi_fake_net_thread
+  out_thread=null_output_thread
+  shift
+elif [ "$1" = 'fake' ]
+then
+  net_thread=hpguppi_fake_net_thread
+  shift
+elif echo "$1" | grep -q 'thread'
 then
   out_thread="$1"
   shift
 fi
 
+echo using net_thread $net_thread
 echo using out_thread $out_thread
 
 for instidx in "$@"
