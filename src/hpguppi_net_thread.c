@@ -31,6 +31,9 @@
 #define PKTSOCK_NBLOCKS (800)
 #define PKTSOCK_NFRAMES (PKTSOCK_FRAMES_PER_BLOCK * PKTSOCK_NBLOCKS)
 
+#define ELAPSED_NS(start,stop) \
+  (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
+
 // Define run states.  Currently two run states are defined: IDLE and RECORD.
 //
 // In the IDLE state, incoming packets are dropped.  Transitioning out of the
@@ -116,7 +119,7 @@ void finalize_block(struct datablock_stats *d)
         pthread_exit(NULL);
     }
     char *header = hpguppi_databuf_header(d->db, d->block_idx);
-    hputi4(header, "PKTIDX", d->packet_idx);
+    hputi8(header, "PKTIDX", d->packet_idx);
     hputi4(header, "PKTSIZE", d->packet_data_size);
     hputi4(header, "NPKT", d->npacket);
     hputi4(header, "NDROP", d->ndropped);
@@ -252,7 +255,7 @@ void write_baseband_packet_to_block_from_pktsock_frame(
     d->last_pkt = seq_num;
 }
 
-static int init(hashpipe_thread_args_t *args)
+static int init(hashpipe_thread_args_t *args, const int fake)
 {
     /* Non-network essential paramaters */
     int blocsize=BLOCK_DATA_SIZE;
@@ -335,10 +338,12 @@ static int init(hashpipe_thread_args_t *args)
     // number of blocks
     p_psp->ps.nblocks = PKTSOCK_NBLOCKS;
 
-    rv = hashpipe_pktsock_open(&p_psp->ps, p_psp->ifname, PACKET_RX_RING);
-    if (rv!=HASHPIPE_OK) {
-        hashpipe_error("hpguppi_net_thread", "Error opening pktsock.");
-        pthread_exit(NULL);
+    if(!fake) {
+        rv = hashpipe_pktsock_open(&p_psp->ps, p_psp->ifname, PACKET_RX_RING);
+        if (rv!=HASHPIPE_OK) {
+            hashpipe_error("hpguppi_net_thread", "Error opening pktsock.");
+            pthread_exit(NULL);
+        }
     }
 
     // Store hpguppi_pktsock_params pointer in args
@@ -348,7 +353,17 @@ static int init(hashpipe_thread_args_t *args)
     return 0;
 }
 
-static void *run(hashpipe_thread_args_t * args)
+static int init_real(hashpipe_thread_args_t *args)
+{
+    return init(args, 0);
+}
+
+static int init_fake(hashpipe_thread_args_t *args)
+{
+    return init(args, 1);
+}
+
+static void *run(hashpipe_thread_args_t * args, const int fake)
 {
     // Local aliases to shorten access to args fields
     // Our output buffer happens to be a hpguppi_input_databuf
@@ -474,10 +489,36 @@ static void *run(hashpipe_thread_args_t * args)
     time_t curtime = 0;
     char timestr[32] = {0};
 
+    // Variables for fake packets
+    uint64_t fake_pktidx=0, fake_pktidx_zero=0;
+    const uint32_t fake_bits_per_packet = 8 * 8192;
+    const uint32_t fake_packets_per_burst = 6 * 3;
+    const uint32_t fake_gbps = 6;
+    struct timespec fake_past_time, fake_now_time, fake_sleep_time;
+    const uint64_t fake_ns_per_burst = fake_bits_per_packet * fake_packets_per_burst / fake_gbps;
+    uint64_t fake_elapsed_ns;
+
     // Drop all packets to date
     unsigned char *p_frame;
-    while((p_frame=hashpipe_pktsock_recv_frame_nonblock(&p_ps_params->ps))) {
-        hashpipe_pktsock_release_frame(p_frame);
+    if(!fake) {
+        while((p_frame=hashpipe_pktsock_recv_frame_nonblock(&p_ps_params->ps))) {
+            hashpipe_pktsock_release_frame(p_frame);
+        }
+    } else {
+        // Allocate p_frame and ininitialize packet
+        p_frame = malloc(p_ps_params->ps.frame_size);
+        // Set packet length
+        PKT_NET(p_frame)[0x18] = ((p_ps_params->packet_size+8) >> 8) & 0xff;
+        PKT_NET(p_frame)[0x19] = ((p_ps_params->packet_size+8)     ) & 0xff;
+        // Init payload
+        uint64_t *payload = (uint64_t *)PKT_UDP_DATA(p_frame);
+        payload[0] = htobe64(fake_pktidx);
+        for(i=1; i<1025; i++) {
+            payload[i] = htobe64(0xcafefacecafeface);
+        }
+        // Initialize time tracking
+        clock_gettime(CLOCK_MONOTONIC, &fake_past_time);
+        fake_sleep_time.tv_sec = 0;
     }
 
     /* Main loop */
@@ -485,8 +526,34 @@ static void *run(hashpipe_thread_args_t * args)
 
         /* Wait for data */
         do {
-            p_frame = hashpipe_pktsock_recv_udp_frame(
-                &p_ps_params->ps, p_ps_params->port, 1000); // 1 second timeout
+            if(!fake) {
+                p_frame = hashpipe_pktsock_recv_udp_frame(
+                    &p_ps_params->ps, p_ps_params->port, 1000); // 1 second timeout
+            } else {
+                // Sleep after every burts, if needed, to keep data rate reasonable
+                if(fake_pktidx % fake_packets_per_burst == 0) {
+                    // Calculate sleep time and sleep
+                    clock_gettime(CLOCK_MONOTONIC, &fake_now_time);
+                    fake_elapsed_ns = ELAPSED_NS(fake_past_time, fake_now_time);
+                    if(fake_elapsed_ns < fake_ns_per_burst) {
+                        fake_sleep_time.tv_nsec = fake_ns_per_burst - fake_elapsed_ns;
+                        nanosleep(&fake_sleep_time, NULL);
+                    }
+                    fake_past_time = fake_now_time;
+                }
+
+                // Reset or increment packet index.  Setting PKTIDX to -1 in
+                // the status buffer (via external means) will simulate a
+                // re-arming of the packet generator (i.e. ROACH2).
+                hgetu8(st.buf, "PKTIDX", (unsigned long long*)&fake_pktidx_zero);
+                if(fake_pktidx_zero == -1) {
+                    fake_pktidx = 0;
+                } else {
+                    fake_pktidx++;
+                }
+
+                *(uint64_t *)PKT_UDP_DATA(p_frame) = htobe64(fake_pktidx & ((1UL<<56)-1));
+            }
 
             // Heartbeat update?
             time(&curtime);
@@ -553,14 +620,14 @@ static void *run(hashpipe_thread_args_t * args)
 
         if(!run_threads()) {
             // We're outta here!
-            hashpipe_pktsock_release_frame(p_frame);
+            if(!fake) hashpipe_pktsock_release_frame(p_frame);
             break;
         }
 
         // If IDLE (not RECORDing), release frame and continue main loop
         if(state == IDLE) {
             // Release frame!
-            hashpipe_pktsock_release_frame(p_frame);
+            if(!fake) hashpipe_pktsock_release_frame(p_frame);
             continue;
         }
 
@@ -579,7 +646,7 @@ static void *run(hashpipe_thread_args_t * args)
                 hashpipe_status_unlock_safe(&st);
             }
             // Release frame!
-            hashpipe_pktsock_release_frame(p_frame);
+            if(!fake) hashpipe_pktsock_release_frame(p_frame);
             continue;
         }
 
@@ -610,7 +677,7 @@ static void *run(hashpipe_thread_args_t * args)
             }
             else {
               // Release frame!
-              hashpipe_pktsock_release_frame(p_frame);
+              if(!fake) hashpipe_pktsock_release_frame(p_frame);
               /* No going backwards */
               continue;
             }
@@ -790,7 +857,7 @@ static void *run(hashpipe_thread_args_t * args)
         }
 
         // Release frame back to ring buffer
-        hashpipe_pktsock_release_frame(p_frame);
+        if(!fake) hashpipe_pktsock_release_frame(p_frame);
 
         /* Will exit if thread has been cancelled */
         pthread_testcancel();
@@ -804,18 +871,38 @@ static void *run(hashpipe_thread_args_t * args)
     return NULL;
 }
 
-static hashpipe_thread_desc_t net_thread = {
+static void *run_real(hashpipe_thread_args_t *args)
+{
+    return run(args, 0);
+}
+
+static void *run_fake(hashpipe_thread_args_t *args)
+{
+    return run(args, 1);
+}
+
+static hashpipe_thread_desc_t real_net_thread = {
     name: "hpguppi_net_thread",
     skey: "NETSTAT",
-    init: init,
-    run:  run,
+    init: init_real,
+    run:  run_real,
+    ibuf_desc: {NULL},
+    obuf_desc: {hpguppi_input_databuf_create}
+};
+
+static hashpipe_thread_desc_t fake_net_thread = {
+    name: "hpguppi_fake_net_thread",
+    skey: "NETSTAT",
+    init: init_fake,
+    run:  run_fake,
     ibuf_desc: {NULL},
     obuf_desc: {hpguppi_input_databuf_create}
 };
 
 static __attribute__((constructor)) void ctor()
 {
-  register_hashpipe_thread(&net_thread);
+  register_hashpipe_thread(&real_net_thread);
+  register_hashpipe_thread(&fake_net_thread);
 }
 
 // vi: set ts=8 sw=4 et :
