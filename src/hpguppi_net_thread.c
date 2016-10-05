@@ -654,13 +654,6 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
             break;
         }
 
-        // If IDLE, release frame and continue main loop
-        if(state == IDLE) {
-            // Release frame!
-            if(!fake) hashpipe_pktsock_release_frame(p_frame);
-            continue;
-        }
-
         /* Check packet size */
         if(p_ps_params->packet_size == 0) {
             p_ps_params->packet_size = PKT_UDP_SIZE(p_frame) - 8;
@@ -680,6 +673,19 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
 
         // Get packet's sequence number
         seq_num = hpguppi_pktsock_seq_num(p_frame);
+
+        // If IDLE, release frame and continue main loop
+        if(state == IDLE) {
+            // Update PKTIDX in status buffer if seq_num % packets_per_block == 0
+            if(seq_num % packets_per_block == 0) {
+                hashpipe_status_lock_safe(&st);
+                hputi8(st.buf, "PKTIDX", seq_num);
+                hashpipe_status_unlock_safe(&st);
+            }
+            // Release frame!
+            if(!fake) hashpipe_pktsock_release_frame(p_frame);
+            continue;
+        }
 
         // If ARMED, check sequence number
         if(state == ARMED) {
