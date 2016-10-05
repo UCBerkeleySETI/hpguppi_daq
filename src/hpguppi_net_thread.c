@@ -631,6 +631,8 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                         hashpipe_status_lock_safe(&st);
                         hgeti8(st.buf, "PKTIDX0", (long long int *)&start_seq_num);
                         hashpipe_status_unlock_safe(&st);
+                        // Ensure start_seq_num is the beginning of a block
+                        start_seq_num -= start_seq_num % packets_per_block;
 
                         // Go to (or stay in) ARMED state
                         state = ARMED;
