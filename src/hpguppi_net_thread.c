@@ -458,6 +458,13 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
     }
     unsigned packets_per_block = block_size / packet_data_size;
 
+    const uint64_t samples_per_second = 3UL*1000*1000*1000; // 3 GHz
+    const uint64_t samples_per_spectrum = 1024;
+    const uint64_t spectra_per_packet = 32;
+
+    double dwell_seconds = 0.0;
+    uint64_t dwell_blocks = 0;
+
     /* If we're in baseband mode, figure out how much to overlap
      * the data blocks.
      */
@@ -496,7 +503,7 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
     /* Misc counters, etc */
     int rv;
     char *curdata=NULL, *curheader=NULL;
-    uint64_t start_seq_num=0, seq_num, last_seq_num=2048, nextblock_seq_num=0;
+    uint64_t start_seq_num=0, stop_seq_num=0, seq_num, last_seq_num=2048, nextblock_seq_num=0;
     int64_t seq_num_diff;
     double drop_frac_avg=0.0;
     const double drop_lpf = 0.25;
@@ -584,8 +591,8 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                 timestr[strlen(timestr)-1] = '\0'; // Chop off trailing newline
                 hashpipe_status_lock_safe(&st);
                 hputs(st.buf, "DAQPULSE", timestr);
-                hputs(st.buf, "DAQSTATE", state == IDLE  ? "stopped" :
-                                          state == ARMED ? "armed"   : "running");
+                hputs(st.buf, "DAQSTATE", state == IDLE  ? "idle" :
+                                          state == ARMED ? "armed"   : "record");
                 hashpipe_status_unlock_safe(&st);
             }
 
@@ -627,12 +634,6 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                             blocks[i].packet_idx = 0;
                             reset_stats(&blocks[i]);
                         }
-                        // Get PKTIDX0 from status buffer if present (no change if not present)
-                        hashpipe_status_lock_safe(&st);
-                        hgeti8(st.buf, "PKTIDX0", (long long int *)&start_seq_num);
-                        hashpipe_status_unlock_safe(&st);
-                        // Ensure start_seq_num is the beginning of a block
-                        start_seq_num -= start_seq_num % packets_per_block;
 
                         // Go to (or stay in) ARMED state
                         state = ARMED;
@@ -674,52 +675,29 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
         // Get packet's sequence number
         seq_num = hpguppi_pktsock_seq_num(p_frame);
 
-        // If IDLE, release frame and continue main loop
-        if(state == IDLE) {
-            // Update PKTIDX in status buffer if seq_num % packets_per_block == 0
-            if(seq_num % packets_per_block == 0) {
-                hashpipe_status_lock_safe(&st);
-                hputi8(st.buf, "PKTIDX", seq_num);
-                hashpipe_status_unlock_safe(&st);
-            }
-            // Release frame!
-            if(!fake) hashpipe_pktsock_release_frame(p_frame);
-            continue;
+        // Update PKTIDX in status buffer if seq_num % packets_per_block == 0
+        // and read PKTSTART, DWELL to calculate start/stop seq numbers.
+        if(seq_num % packets_per_block == 0) {
+            hashpipe_status_lock_safe(&st);
+            hputi8(st.buf, "PKTIDX", seq_num);
+            hgeti8(st.buf, "PKTSTART", (long long int *)&start_seq_num);
+            start_seq_num -= start_seq_num % packets_per_block;
+            hputi8(st.buf, "PKTSTART", start_seq_num);
+            hgetr8(st.buf, "DWELL", &dwell_seconds);
+            // Dwell blocks is equal to:
+            //
+            //           dwell_seconds * samples/second
+            //     -------------------------------------------
+            //     samples/spectrum * spectra/pkt * pkts/block
+            //
+            // To get an integer number of blocks, simply truncate
+            dwell_blocks = trunc(dwell_seconds * samples_per_second /
+                    (samples_per_spectrum * spectra_per_packet * packets_per_block));
+
+            stop_seq_num = start_seq_num + packets_per_block * dwell_blocks;
+            hputi8(st.buf, "PKTSTOP", stop_seq_num);
+            hashpipe_status_unlock_safe(&st);
         }
-
-        // If ARMED, check sequence number
-        if(state == ARMED) {
-            if(start_seq_num <= seq_num && seq_num < start_seq_num + START_OK_MARGIN) {
-                // OK, we got a startable packet!
-                // Warn if seq_num is not exactly start_seq_num
-                if(seq_num != start_seq_num) {
-                    hashpipe_warn("hpguppi_net_thread",
-                            "first packet number is not %lu (seq_num = %lu)",
-                            start_seq_num, seq_num);
-                }
-                // Go to RECORD state
-                state = RECORD;
-            } else {
-                // Not a startable packet!
-                // Handle late starts (i.e. "low" sequence offset, but not so
-                // low enough to be a startable packet) differently from
-                // packets with "high" sequence offset, which are assumed to be
-                // left over from a previous arming.
-                if (seq_num < start_seq_num + START_LATE_MARGIN) {
-                    hashpipe_warn("hpguppi_net_thread",
-                            "late start detected (seq_num = %lu), returning to idle", seq_num);
-
-                    // Go to IDLE state
-                    state = IDLE;
-                }
-
-                // Release frame!
-                hashpipe_pktsock_release_frame(p_frame);
-                continue;
-            }
-        }
-
-        // FYI: We must be in RECORD state if we get here!
 
         /* Update status if needed */
         if (waiting!=0) {
@@ -727,6 +705,13 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
             hputs(st.buf, status_key, "receiving");
             hashpipe_status_unlock_safe(&st);
             waiting=0;
+        }
+
+        // If IDLE, release frame and continue main loop
+        if(state == IDLE) {
+            // Release frame!
+            if(!fake) hashpipe_pktsock_release_frame(p_frame);
+            continue;
         }
 
         /* Convert packet format if needed */
@@ -786,6 +771,42 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                     : 0.0);
             hashpipe_status_unlock_safe(&st);
 
+            if(state == ARMED && seq_num == start_seq_num) {
+                state = RECORD;
+
+                /* Get obs start time */
+                get_current_mjd(&stt_imjd, &stt_smjd, &stt_offs);
+                if (stt_offs>0.5) { stt_smjd+=1; stt_offs-=1.0; }
+                if (fabs(stt_offs)>0.1) {
+                    hashpipe_warn("hpguppi_net_thread",
+                            "Second fraction = %3.1f ms > +/-100 ms",
+                            stt_offs*1e3);
+                }
+                stt_offs = 0.0;
+
+                /* Reset stats */
+                npacket_total=0;
+                ndropped_total=0;
+                nbogus_total=0;
+
+                // Update status buffer
+                hashpipe_status_lock_safe(&st);
+                hputs(st.buf, "DAQSTATE", "record");
+                hputi4(st.buf, "STT_IMJD", stt_imjd);
+                hputi4(st.buf, "STT_SMJD", stt_smjd);
+                hputr8(st.buf, "STT_OFFS", stt_offs);
+                hputi4(st.buf, "STTVALID", 1);
+                hashpipe_status_unlock_safe(&st);
+            }
+
+            if(state == RECORD && seq_num == stop_seq_num) {
+                state = ARMED;
+                hashpipe_status_lock_safe(&st);
+                hputs(st.buf, "DAQSTATE", "armed");
+                hputi4(st.buf, "STTVALID", 0);
+                hashpipe_status_unlock_safe(&st);
+            }
+
             /* Finalize first block, and push it off the list.
              * Then grab next available block.
              */
@@ -799,61 +820,19 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
             nextblock_seq_num = lblock->packet_idx
                 + packets_per_block - overlap_packets;
 
-            /* If new obs started, reset total counters, get start
-             * time.  Start time is rounded to nearest integer
-             * second, with warning if we're off that by more
-             * than 100ms.  Any current blocks on the stack
-             * are also finalized/reset */
+            // If new block is forced, any current blocks on the stack are
+            // finalized/reset. [TODO: Is this really needed?]
             if (force_new_block) {
-                /* Reset stats */
-                npacket_total=0;
-                ndropped_total=0;
-                nbogus_total=0;
-
-                /* Get obs start time */
-                get_current_mjd(&stt_imjd, &stt_smjd, &stt_offs);
-                if (stt_offs>0.5) { stt_smjd+=1; stt_offs-=1.0; }
-                if (fabs(stt_offs)>0.1) {
-                    hashpipe_warn("hpguppi_net_thread",
-                            "Second fraction = %3.1f ms > +/-100 ms",
-                            stt_offs*1e3);
-                }
-                stt_offs = 0.0;
-
-                /* Warn if 1st packet number is not zero */
-                if (seq_num!=0) {
-                    hashpipe_warn("hpguppi_net_thread",
-                            "First packet number is not 0 (seq_num=%lld)",
-                            seq_num);
-                }
-
                 /* Flush any current buffers */
                 for (i=0; i<nblock-1; i++) {
                     if (blocks[i].block_idx>=0)
                         finalize_block(&blocks[i]);
                     reset_block(&blocks[i]);
                 }
-
             }
 
             /* Read/update current status shared mem */
             hashpipe_status_lock_safe(&st);
-            if (stt_imjd!=0) {
-                hputi4(st.buf, "STT_IMJD", stt_imjd);
-                hputi4(st.buf, "STT_SMJD", stt_smjd);
-                hputr8(st.buf, "STT_OFFS", stt_offs);
-                hputi4(st.buf, "STTVALID", 1);
-            } else {
-                // Put a non-accurate start time to avoid polyco
-                // errors.
-                get_current_mjd(&stt_imjd, &stt_smjd, &stt_offs);
-                hputi4(st.buf, "STT_IMJD", stt_imjd);
-                hputi4(st.buf, "STT_SMJD", stt_smjd);
-                hputi4(st.buf, "STTVALID", 0);
-                // Reset to zero
-                stt_imjd = 0;
-                stt_smjd = 0;
-            }
             memcpy(status_buf, st.buf, HASHPIPE_STATUS_TOTAL_SIZE);
             hashpipe_status_unlock_safe(&st);
 

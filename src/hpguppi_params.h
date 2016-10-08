@@ -22,6 +22,7 @@ struct hpguppi_params {
     int n_dropped;              // Number of packets dropped in current block
     int packets_per_block;      // Total number of packets per block
     int stt_valid;              // Has an accurate start time been measured
+    long long start_pkt;        // Packet number at start of a recording
     /* Backend hardware info */
     int decimation_factor;      // Number of raw spectra integrated
     int n_bits_adc;             // Number of bits sampled by ADCs

@@ -65,12 +65,13 @@ static void *run(hashpipe_thread_args_t * args)
     pf.sub.dat_scales = NULL;
     pthread_cleanup_push((void *)hpguppi_free_psrfits, &pf);
 
-    /* Init output file */
-    static int fdraw = 0;
+    /* Init output file descriptor (-1 means no file open) */
+    static int fdraw = -1;
     pthread_cleanup_push((void *)safe_close, &fdraw);
 
     /* Loop */
-    int packetidx=0, npacket=0, ndrop=0, packetsize=0, blocksize=0, len=0;
+    long long int packetidx=0, pktstart=0, pktstop=0;
+    int npacket=0, ndrop=0, packetsize=0, blocksize=0, len=0;
     int curblock=0;
     int block_count=0, blocks_per_file=128, filenum=0;
     int got_packet_0=0, first=1;
@@ -100,21 +101,46 @@ static void *run(hashpipe_thread_args_t * args)
         }
 
         /* Parse packet size, npacket from header */
-        hgeti4(ptr, "PKTIDX", &packetidx);
+        hgeti8(ptr, "PKTIDX", &packetidx);
+        hgeti8(ptr, "PKTSTART", &pktstart);
+        hgeti8(ptr, "PKTSTOP", &pktstop);
         hgeti4(ptr, "PKTSIZE", &packetsize);
         hgeti4(ptr, "NPKT", &npacket);
         hgeti4(ptr, "NDROP", &ndrop);
 
+	// If packet idx is NOT within start/stop range
+	if(packetidx < pktstart || pktstop <= packetidx) {
+	    // If file open, close it
+	    if(fdraw != -1) {
+		// Close file
+		close(fdraw);
+		// Reset fdraw, got_packet_0, filenum, block_count
+		fdraw = -1;
+		got_packet_0 = 0;
+		filenum = 0;
+		block_count=0;
+	    }
+	    /* Mark as free */
+	    hpguppi_input_databuf_set_free(db, curblock);
+
+	    /* Go to next block */
+	    curblock = (curblock + 1) % db->header.n_block;
+
+	    continue;
+	}
+
         /* Set up data ptr for quant routines */
         pf.sub.data = (unsigned char *)hpguppi_databuf_data(db, curblock);
 
-        /* Wait for packet 0 before starting write */
-        if (got_packet_0==0 && packetidx==0 && gp.stt_valid==1) {
+        // Wait for packet 0 before starting write
+	// "packet 0" is the first packet/block of the new recording,
+	// it is not necessarily packetidx == 0.
+        if (got_packet_0==0 && gp.stt_valid==1) {
             got_packet_0 = 1;
             hpguppi_read_obs_params(ptr, &gp, &pf);
             directio = hpguppi_read_directio_mode(ptr);
             char fname[256];
-            sprintf(fname, "%s.%4.4d.raw", pf.basefilename, filenum);
+            sprintf(fname, "%s.%04d.raw", pf.basefilename, filenum);
             fprintf(stderr, "Opening raw file '%s' (directio=%d)\n", fname, directio);
             // Create the output directory if needed
             char datadir[1024];

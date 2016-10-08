@@ -296,7 +296,7 @@ void hpguppi_read_obs_params(char *buf,
 
     // Coherent dedispersion params
     get_int("CODD", g->coherent, 0);
-    get_int("FFTLEN", p->dedisp.fft_len, 0);
+    get_lon("PKTSTART", g->start_pkt, 0);
     get_int("OVERLAP", p->dedisp.overlap, 0);
     get_dbl("CHAN_DM", p->hdr.chan_dm, 0.0);
     
@@ -324,8 +324,10 @@ void hpguppi_read_obs_params(char *buf,
         sprintf(base, "%s_%05d_%s_%04d_cal", backend, p->hdr.start_day,
                 p->hdr.source, p->hdr.scan_number);
     } else {
-        sprintf(base, "%s_%05d_%05d_%s_%04d", backend,
-                p->hdr.start_day, (int)(p->hdr.start_sec),
+        // TODO don't hardcode the 16384 value for packets_per_block.
+        // base is BACKEND_MJD_SEC_BLK_SRC_SCAN.
+        sprintf(base, "%s_%05d_%05d_%06lld_%s_%04d", backend,
+                p->hdr.start_day, (int)(p->hdr.start_sec), g->start_pkt/16384,
                 p->hdr.source, p->hdr.scan_number);
     }
 #ifdef NO_PROJECT_DIR
