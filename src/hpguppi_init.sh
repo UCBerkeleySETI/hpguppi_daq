@@ -109,6 +109,9 @@ do
   shift
 done
 
+# Get sync time from redis
+sync_time=`redis-cli -h redishost get sync_time | tr -d '"'`
+
 for instidx in $instance_ids
 do
   args="${instances[$instidx]}"
@@ -118,6 +121,8 @@ do
     if init $instidx $args "${@}"
     then
       echo Instance $hostname/$instidx pid $!
+      hashpipe_check_status -I $instidx -k SYNCTIME -i ${sync_time:-0}
+      echo start > /tmp/hpguppi_daq_control/$instidx
     fi
   else
     echo Instance $instidx not defined for host $hostname
