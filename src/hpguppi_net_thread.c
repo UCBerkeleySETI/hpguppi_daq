@@ -799,7 +799,7 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                 hashpipe_status_unlock_safe(&st);
             }
 
-            if(state == RECORD && seq_num == stop_seq_num) {
+            if(state == RECORD && seq_num >= stop_seq_num) {
                 state = ARMED;
                 hashpipe_status_lock_safe(&st);
                 hputs(st.buf, "DAQSTATE", "armed");
