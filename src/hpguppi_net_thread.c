@@ -37,30 +37,44 @@
 // Define run states.  Currently three run states are defined: IDLE, ARMED, and
 // RECORD.
 //
-// In the IDLE state, incoming packets are dropped.  Transitioning out of the
-// IDLE state will reinitialize the current blocks.  A "start" command will
-// transition the state from IDLE to ARMED.
+// In all states, the PKTIDX field is updated with the value from received
+// packets.  Whenever the first PKTIDX of a block is received (i.e. whenever
+// PKTIDX is a multiple of the number of packets per block), the value for
+// PKTSTART and DWELL are read from the status buffer.  PKTSTART is rounded
+// down, if needed, to ensure that it is a multiple of the number of packets
+// per block, then PKTSTART is written back to the status buffer.  DWELL is
+// interpreted as the number of seconds to record and is used to calculate
+// PKTSTOP (which gets rounded down, if needed, to be a multiple of the number
+// of packets per block).
 //
-// In the ARMED state, incoming packets are dropped until receiving a packet
-// with a sequence number between the PKTIDX0 sequence number and PKTIDX0+64.
-// PKTIDX0 is taken from the status buffer (defaulting to 0 if not present).
-// Ideally, data taking will start at exactly PKTIDX0, but a range of starting
-// sequence numbers is used to allow for missing up to a few packets at
-// startup.  If receiving a packet with sequence number between 64 and 2**20,
-// assume that we missed the first 64 packets.  Sequence numbers larger than
-// that are assumed to be a continuation of the previous arming and are
-// silently dropped.
+// In the IDLE state, incoming packets are dropped, but PKTIDX is still
+// updated.  Transitioning out of the IDLE state will reinitialize the current
+// blocks.  A "start" command will transition the state from IDLE to ARMED.
+// A "stop" command will transition the state from ARMED or RECORD to IDLE.
 //
-// TODO The 2**20 limit should probably be the number of packets per data
-//      block.
+// In the ARMED state, incoming packets are processed (i.e. stored in the net
+// thread's output buffer) and full blocks are passed to the next thread.  When
+// the processed PKTIDX is equal to PKTSTART the state transitions to RECORD
+// and the following actions occur:
 //
-// Once a packet in the 0..63 range is received, the state transitions to
-// RECORD.
+//   1. The MJD of the observation start time is calculated (TODO Calculate
+//      from SYNCTIME and PKTIDX)
 //
-// In the RECORD state, incoming packets are stored in the current block.  When
-// the current block is "full", it is marked as filled and advanced to the next
-// block.  Transitioning out of the RECORD state changes nothing (partial block
-// will eventually be reinitialized).
+//   2. The packet stats counters are reset
+//
+//   3. The STT_IMDJ and STT_SMJD are updated in the status buffer
+//
+//   4. STTVALID is set to 1
+//
+// In the RECORD state, incoming packets are processed (i.e. stored in the net
+// thread's output buffer) and full blocks are passed to the next thread (same
+// as in the ARMED state).  When the processed PKTIDX is greater than or equal
+// to PKTSTOP the state transitions to ARMED and STTVALID is set to 0.
+//
+// The downstream thread (i.e. hpguppi_rawdisk_thread) is expected to use a
+// combination of PKTIDX, PKTSTART, PKTSTOP, and (optionally) STTVALID to
+// determine whether the blocks should be discarded or processed (e.g. written
+// to disk).
 
 enum run_states {IDLE, ARMED, RECORD};
 
