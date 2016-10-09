@@ -114,6 +114,7 @@ sync_time=`redis-cli -h redishost get sync_time | tr -d '"'`
 
 for instidx in $instance_ids
 do
+  fifo="/tmp/hpguppi_daq_control/$instidx"
   args="${instances[$instidx]}"
   if [ -n "${args}" ]
   then
@@ -122,7 +123,23 @@ do
     then
       echo Instance $hostname/$instidx pid $!
       hashpipe_check_status -I $instidx -k SYNCTIME -i ${sync_time:-0}
-      echo start > /tmp/hpguppi_daq_control/$instidx
+
+      # Loop until control fifo exists, time out after 3 seconds
+      timeout=3
+      while [ $timeout -gt 0 -a ! -e $fifo ]
+      do
+        timeout=$((timeout-1))
+        sleep 1
+      done
+
+      # If FIFO exists, use it to "start" the instance
+      # (i.e. put it in the armed state)
+      if [ -e $fifo ]
+      then
+        echo start > $fifo
+      else
+        echo "Error: control FIFO not created within 3 seconds"
+      fi
     fi
   else
     echo Instance $instidx not defined for host $hostname
