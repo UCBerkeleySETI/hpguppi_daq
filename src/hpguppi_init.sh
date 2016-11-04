@@ -53,6 +53,7 @@ function init() {
   hashpipe -p hpguppi_daq -I $instance \
     -o BINDHOST=$bindhost \
     -o BINDPORT=60000 \
+    -o DATADIR=$dir \
     ${@} \
     -c $netcpu hpguppi_net_thread \
     -c $outcpu $out_thread
@@ -61,6 +62,7 @@ function init() {
   hashpipe -p hpguppi_daq -I $instance \
     -o BINDHOST=$bindhost \
     -o BINDPORT=60000 \
+    -o DATADIR=$dir \
     ${@} \
     -c $netcpu $net_thread \
     -c $outcpu $out_thread \
