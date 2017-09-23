@@ -1,7 +1,8 @@
-/* hpguppi_net_thread.c
+/* hpguppi_mb1_net_thread.c
  *
  * Routine to read packets from network and put them
- * into shared memory blocks.
+ * into shared memory blocks.  This thread expects to receive one beam only,
+ * spread over 8 packets per mcount.
  */
 
 #define _GNU_SOURCE 1
@@ -203,50 +204,9 @@ static int block_packet_check(struct datablock_stats *d,
  */
 static uint64_t hpguppi_pktsock_seq_num(const unsigned char *p_frame)
 {
-    // XXX Temp for new baseband mode, blank out top 8 bits which
-    // contain channel info.
     uint64_t tmp = be64toh(*(uint64_t *)PKT_UDP_DATA(p_frame));
-    tmp &= 0x00FFFFFFFFFFFFFF;
+    tmp >>= 2;
     return tmp ;
-}
-
-/* Write a search mode (filterbank) style packet (from pktsock) into the
- * datablock.  Also zeroes out any dropped packets.
- */
-static void write_search_packet_to_block_from_pktsock_frame(
-        struct datablock_stats *d, unsigned char *p_frame)
-{
-    if(d->block_idx < 0) {
-        hashpipe_error(__FUNCTION__, "d->block_idx == %d", d->block_idx);
-        return;
-    }
-
-    const uint64_t seq_num = hpguppi_pktsock_seq_num(p_frame);
-    if(block_packet_check(d, seq_num) != 0) {
-        hashpipe_error("hpguppi_net_thread",
-                "seq_num %lld does not belong in block %d (%lld[+%d])",
-                seq_num, d->block_idx, d->packet_idx, d->packets_per_block);
-        return;
-    }
-
-    int64_t next_pos = seq_num - d->packet_idx;
-
-    // Fill in from cur_pos to next_pos with zeros
-    // (not robust to out of order packet arrival)
-    int cur_pos=0;
-    if (d->last_pkt > d->packet_idx) cur_pos = d->last_pkt - d->packet_idx + 1;
-    char *dataptr = hpguppi_databuf_data(d->db, d->block_idx)
-        + (cur_pos*d->packet_data_size % BLOCK_DATA_SIZE);
-    for (; cur_pos<next_pos; cur_pos++) {
-        memset(dataptr, 0, d->packet_data_size);
-        dataptr += d->packet_data_size;
-        d->npacket++;
-        d->ndropped++;
-    }
-    hpguppi_udp_packet_data_copy_from_payload(dataptr,
-        (char *)PKT_UDP_DATA(p_frame), (size_t)PKT_UDP_SIZE(p_frame));
-    d->last_pkt = seq_num;
-    d->npacket++;
 }
 
 /* Write a baseband mode packet into the block.  Includes a
@@ -291,7 +251,7 @@ static void write_baseband_packet_to_block_from_pktsock_frame(
     d->last_pkt = seq_num;
 }
 
-static int init(hashpipe_thread_args_t *args, const int fake)
+static int init(hashpipe_thread_args_t *args)
 {
     /* Non-network essential paramaters */
     int blocsize=BLOCK_DATA_SIZE;
@@ -389,17 +349,7 @@ static int init(hashpipe_thread_args_t *args, const int fake)
     return 0;
 }
 
-static int init_real(hashpipe_thread_args_t *args)
-{
-    return init(args, 0);
-}
-
-static int init_fake(hashpipe_thread_args_t *args)
-{
-    return init(args, 1);
-}
-
-static void *run(hashpipe_thread_args_t * args, const int fake)
+static void *run(hashpipe_thread_args_t * args)
 {
     // Local aliases to shorten access to args fields
     // Our output buffer happens to be a hpguppi_input_databuf
@@ -905,18 +855,14 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
         }
 
         /* Copy packet into any blocks where it belongs.
-         * The "write packets" functions also update drop stats
+         * The "write packet" function also update drop stats
          * for blocks, etc.
          */
         for (i=0; i<nblock; i++) {
             if ((blocks[i].block_idx>=0)
-                    && (block_packet_check(&blocks[i],seq_num)==0)) {
-                if (baseband_packets)
-                    write_baseband_packet_to_block_from_pktsock_frame(
-                        &blocks[i], p_frame, nchan);
-                else
-                    write_search_packet_to_block_from_pktsock_frame(
-                        &blocks[i], p_frame);
+            && (block_packet_check(&blocks[i],seq_num)==0)) {
+                write_baseband_packet_to_block_from_pktsock_frame(
+                    &blocks[i], p_frame, nchan);
             }
         }
 
@@ -935,30 +881,11 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
     return NULL;
 }
 
-static void *run_real(hashpipe_thread_args_t *args)
-{
-    return run(args, 0);
-}
-
-static void *run_fake(hashpipe_thread_args_t *args)
-{
-    return run(args, 1);
-}
-
 static hashpipe_thread_desc_t real_net_thread = {
-    name: "hpguppi_net_thread",
+    name: "hpguppi_mb1_net_thread",
     skey: "NETSTAT",
-    init: init_real,
-    run:  run_real,
-    ibuf_desc: {NULL},
-    obuf_desc: {hpguppi_input_databuf_create}
-};
-
-static hashpipe_thread_desc_t fake_net_thread = {
-    name: "hpguppi_fake_net_thread",
-    skey: "NETSTAT",
-    init: init_fake,
-    run:  run_fake,
+    init: init,
+    run:  run,
     ibuf_desc: {NULL},
     obuf_desc: {hpguppi_input_databuf_create}
 };
