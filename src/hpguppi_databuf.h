@@ -9,18 +9,6 @@
 #include "hashpipe_databuf.h"
 #include "config.h"
 
-#if 0
-struct guppi_databuf {
-    char data_type[64]; /* Type of data in buffer */
-    size_t struct_size; /* Size alloced for this struct (bytes) */
-    size_t block_size;  /* Size of each data block (bytes) */
-    size_t header_size; /* Size of each block header (bytes) */
-    int shmid;          /* ID of this shared mem segment */
-    int semid;          /* ID of locking semaphore set */
-    int n_block;        /* Number of data blocks in buffer */
-};
-#endif
-
 // Technically we only need to align to 512 bytes,
 // but this keeps things 4K (i.e. page) aligned.
 #define ALIGNMENT_SIZE (4096)
