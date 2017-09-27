@@ -222,7 +222,7 @@ static void write_baseband_packet_to_block_from_pktsock_frame(
 
     const uint64_t seq_num = hpguppi_pktsock_seq_num(p_frame);
     if(block_packet_check(d, seq_num) != 0) {
-        hashpipe_error("hpguppi_net_thread",
+        hashpipe_error("hpguppi_mb1_net_thread",
                 "seq_num %lld does not belong in block %d (%lld[+%d])",
                 seq_num, d->block_idx, d->packet_idx, d->packets_per_block);
         return;
@@ -269,7 +269,7 @@ static int init(hashpipe_thread_args_t *args)
     /* Create control FIFO (/tmp/hpguppi_daq_control/$inst_id) */
     int rv = mkdir(HPGUPPI_DAQ_CONTROL, 0777);
     if (rv!=0 && errno!=EEXIST) {
-        hashpipe_error("hpguppi_net_thread", "Error creating control fifo directory");
+        hashpipe_error("hpguppi_mb1_net_thread", "Error creating control fifo directory");
         return HASHPIPE_ERR_SYS;
     } else if(errno == EEXIST) {
         errno = 0;
@@ -278,7 +278,7 @@ static int init(hashpipe_thread_args_t *args)
     sprintf(fifo_name, "%s/%d", HPGUPPI_DAQ_CONTROL, args->instance_id);
     rv = mkfifo(fifo_name, 0666);
     if (rv!=0 && errno!=EEXIST) {
-        hashpipe_error("hpguppi_net_thread", "Error creating control fifo");
+        hashpipe_error("hpguppi_mb1_net_thread", "Error creating control fifo");
         return HASHPIPE_ERR_SYS;
     } else if(errno == EEXIST) {
         errno = 0;
@@ -340,7 +340,7 @@ static int init(hashpipe_thread_args_t *args)
     if(!fake) {
         rv = hashpipe_pktsock_open(&p_psp->ps, p_psp->ifname, PACKET_RX_RING);
         if (rv!=HASHPIPE_OK) {
-            hashpipe_error("hpguppi_net_thread", "Error opening pktsock.");
+            hashpipe_error("hpguppi_mb1_net_thread", "Error opening pktsock.");
             pthread_exit(NULL);
         }
     }
@@ -368,7 +368,7 @@ static void *run(hashpipe_thread_args_t * args)
     sprintf(fifo_name, "%s/%d", HPGUPPI_DAQ_CONTROL, args->instance_id);
     int fifo_fd = open(fifo_name, O_RDONLY | O_NONBLOCK);
     if (fifo_fd<0) {
-        hashpipe_error("hpguppi_net_thread", "Error opening control fifo)");
+        hashpipe_error("hpguppi_mb1_net_thread", "Error opening control fifo)");
         pthread_exit(NULL);
     }
 
@@ -397,10 +397,10 @@ static void *run(hashpipe_thread_args_t * args)
     npol = pf.hdr.npol;
     if (strncmp(p_ps_params->packet_format, "PARKES", 6)==0) { use_parkes_packets=1; }
     if (use_parkes_packets) {
-        printf("hpguppi_net_thread: Using Parkes UDP packet format.\n");
+        printf("hpguppi_mb1_net_thread: Using Parkes UDP packet format.\n");
         acclen = gp.decimation_factor;
         if (acclen==0) {
-            hashpipe_error("hpguppi_net_thread",
+            hashpipe_error("hpguppi_mb1_net_thread",
                     "ACC_LEN must be set to use Parkes format");
             pthread_exit(NULL);
         }
@@ -419,7 +419,7 @@ static void *run(hashpipe_thread_args_t * args)
             hputi4(status_buf, "BLOCSIZE", block_size);
     } else {
         if (block_size > BLOCK_DATA_SIZE) {
-            hashpipe_error("hpguppi_net_thread", "BLOCSIZE > databuf block_size");
+            hashpipe_error("hpguppi_mb1_net_thread", "BLOCSIZE > databuf block_size");
             block_size = BLOCK_DATA_SIZE;
             hputi4(status_buf, "BLOCSIZE", block_size);
         }
@@ -444,7 +444,7 @@ static void *run(hashpipe_thread_args_t * args)
             // XXX This is only true for 8-bit, 2-pol data:
             int samples_per_packet = packet_data_size / nchan / (size_t)4;
             if (overlap_packets % samples_per_packet) {
-                hashpipe_error("hpguppi_net_thread",
+                hashpipe_error("hpguppi_mb1_net_thread",
                         "Overlap is not an integer number of packets");
                 overlap_packets = (overlap_packets/samples_per_packet+1);
                 hputi4(status_buf, "OVERLAP",
@@ -575,14 +575,14 @@ static void *run(hashpipe_thread_args_t * args)
             // Check FIFO for command
             rv = read(fifo_fd, fifo_cmd, MAX_CMD_LEN-1);
             if(rv == -1 && errno != EAGAIN) {
-                hashpipe_error("hpguppi_net_thread", "error reading control fifo)");
+                hashpipe_error("hpguppi_mb1_net_thread", "error reading control fifo)");
             } else if(rv > 0) {
                 // Trim newline from command, if any
                 char *newline = strchr(fifo_cmd, '\n');
                 if (newline!=NULL) *newline='\0';
 
                 // Log command
-                hashpipe_warn("hpguppi_net_thread", "got %s command", fifo_cmd);
+                hashpipe_warn("hpguppi_mb1_net_thread", "got %s command", fifo_cmd);
 
                 // Act on command
                 if(strcasecmp(fifo_cmd, "QUIT") == 0) {
@@ -591,7 +591,7 @@ static void *run(hashpipe_thread_args_t * args)
                     // Hashpipe will exit upon thread exit
                     pthread_exit(NULL);
                 } else if(strcasecmp(fifo_cmd, "MONITOR") == 0) {
-                    hashpipe_warn("hpguppi_net_thread",
+                    hashpipe_warn("hpguppi_mb1_net_thread",
                             "MONITOR command not supported, use null_output_thread.");
                 } else if(strcasecmp(fifo_cmd, "START") == 0) {
                     // If in the IDLE or ARMED states
@@ -610,7 +610,7 @@ static void *run(hashpipe_thread_args_t * args)
                     // Go to IDLE state
                     state = IDLE;
                 } else {
-                    hashpipe_error("hpguppi_net_thread",
+                    hashpipe_error("hpguppi_mb1_net_thread",
                             "got unrecognized command '%s'", fifo_cmd);
                 }
             }
@@ -694,7 +694,7 @@ static void *run(hashpipe_thread_args_t * args)
             if (seq_num_diff<-1024) {
                 force_new_block=1;
             } else if (seq_num_diff==0) {
-                hashpipe_warn("hpguppi_net_thread",
+                hashpipe_warn("hpguppi_mb1_net_thread",
                         "Received duplicate packet (seq_num=%lu)",
                         seq_num);
             }
@@ -746,7 +746,7 @@ static void *run(hashpipe_thread_args_t * args)
                 get_current_mjd(&stt_imjd, &stt_smjd, &stt_offs);
                 if (stt_offs>0.5) { stt_smjd+=1; stt_offs-=1.0; }
                 if (fabs(stt_offs)>0.1) {
-                    hashpipe_warn("hpguppi_net_thread",
+                    hashpipe_warn("hpguppi_mb1_net_thread",
                             "Second fraction = %3.1f ms > +/-100 ms",
                             stt_offs*1e3);
                 }
@@ -813,7 +813,7 @@ static void *run(hashpipe_thread_args_t * args)
                         block_size = BLOCK_DATA_SIZE;
                 } else {
                     if (block_size > BLOCK_DATA_SIZE) {
-                        hashpipe_error("hpguppi_net_thread",
+                        hashpipe_error("hpguppi_mb1_net_thread",
                                 "BLOCSIZE > databuf block_size");
                         block_size = BLOCK_DATA_SIZE;
                     }
@@ -843,7 +843,7 @@ static void *run(hashpipe_thread_args_t * args)
                     hashpipe_status_unlock_safe(&st);
                     continue;
                 } else {
-                    hashpipe_error("hpguppi_net_thread",
+                    hashpipe_error("hpguppi_mb1_net_thread",
                             "error waiting for free databuf");
                     pthread_exit(NULL);
                 }
