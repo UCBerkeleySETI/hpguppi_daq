@@ -260,6 +260,7 @@ static int init(hashpipe_thread_args_t *args)
     int npol=4;
     double obsbw=187.5;
     int obsnchan=64;
+    int obsschan=0;
     int overlap=0;
     double tbin=0.0;
     char obs_mode[80];
@@ -305,6 +306,7 @@ static int init(hashpipe_thread_args_t *args)
     hgeti4(st.buf, "NPOL", &npol);
     hgetr8(st.buf, "OBSBW", &obsbw);
     hgeti4(st.buf, "OBSNCHAN", &obsnchan);
+    hgeti4(st.buf, "OBSSCHAN", &obsschan);
     hgeti4(st.buf, "OVERLAP", &overlap);
     hgets(st.buf, "OBS_MODE", 80, obs_mode);
     // Calculate TBIN
@@ -319,6 +321,7 @@ static int init(hashpipe_thread_args_t *args)
     hputi4(st.buf, "NPOL", npol);
     hputr8(st.buf, "OBSBW", obsbw);
     hputi4(st.buf, "OBSNCHAN", obsnchan);
+    hputi4(st.buf, "OBSSCHAN", obsschan);
     hputi4(st.buf, "OVERLAP", overlap);
     hputr8(st.buf, "TBIN", tbin);
     hputs(st.buf, "OBS_MODE", obs_mode);
