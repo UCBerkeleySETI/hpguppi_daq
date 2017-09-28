@@ -50,6 +50,8 @@ struct hpguppi_pktsock_params {
     int port;         /* UDP receive port */
     size_t packet_size;     /* Expected packet size, 0 = don't care */
     char packet_format[32]; /* Packet format */
+    int obsschan; /* Needed for variable length packets */
+    int obsnchan; /* Needed for variable length packets */
 
     // Holds packet socket details
     struct hashpipe_pktsock ps;

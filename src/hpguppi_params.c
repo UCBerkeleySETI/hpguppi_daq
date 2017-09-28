@@ -125,6 +125,8 @@ void hpguppi_read_pktsock_params(char *buf, struct hpguppi_pktsock_params *p)
 {
     get_str("BINDHOST", p->ifname, 80, "eth4");
     get_int("BINDPORT", p->port, 60000);
+    get_int("OBSSCHAN", p->obsschan, 0);
+    get_int("OBSNCHAN", p->obsnchan, 64);
     get_str("PKTFMT", p->packet_format, 32, "1SFA");
     if (strncmp(p->packet_format, "PARKES", 6)==0)
         p->packet_size = 2056;
