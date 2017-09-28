@@ -94,6 +94,7 @@ struct datablock_stats {
     uint64_t packet_idx;              // Index of first packet number in block
     size_t packet_data_size;          // Data size of each packet
     int packets_per_block;            // Total number of packets to go in the block
+    int seqnums_per_block;            // Total number of seqnums to go in the block
     int overlap_packets;              // Overlap between blocks in packets
     int npacket;                      // Number of packets filled so far
     int ndropped;                     // Number of dropped packets so far
@@ -143,7 +144,8 @@ static void init_block(struct datablock_stats *d, struct hpguppi_input_databuf *
 {
     d->db = db;
     d->packet_data_size = packet_data_size;
-    d->packets_per_block = packets_per_block;
+    d->packets_per_block = packets_per_block & 7;  // Eight packets will have
+    d->seqnums_per_block = packets_per_block >> 3; // a common pktidx (aka mcount)
     d->overlap_packets = overlap_packets;
     reset_block(d);
 }
@@ -185,7 +187,7 @@ static void increment_block(struct datablock_stats *d,
 
     d->block_idx = (d->block_idx + 1) % d->db->header.n_block;
     d->packet_idx = next_seq_num - (next_seq_num
-            % (d->packets_per_block - d->overlap_packets));
+            % (d->seqnums_per_block - d->overlap_packets));
     reset_stats(d);
     // TODO: wait for block free here?
 }
@@ -195,25 +197,38 @@ static int block_packet_check(struct datablock_stats *d,
         uint64_t seq_num)
 {
     if (seq_num < d->packet_idx) return(-1);
-    else if (seq_num >= d->packet_idx + d->packets_per_block) return(1);
+    else if (seq_num >= d->packet_idx + d->seqnums_per_block) return(1);
     else return(0);
 }
 
-/* Return packet index from a pktsock frame that is assumed to contain a UDP
- * packet.
+/* Return packet index from a pktsock frame that is assumed to contain an S6
+ * UDP packet.
  */
 static uint64_t hpguppi_pktsock_seq_num(const unsigned char *p_frame)
 {
     uint64_t tmp = be64toh(*(uint64_t *)PKT_UDP_DATA(p_frame));
-    tmp >>= 2;
+    tmp >>= 16;
     return tmp ;
+}
+
+/* Return channel from a pktsock frame that is assumed to contain an S6 UDP
+ * packet.
+ */
+static uint64_t hpguppi_pktsock_hdr_chan(const unsigned char *p_frame)
+{
+    uint64_t tmp = be64toh(*(uint64_t *)PKT_UDP_DATA(p_frame));
+    tmp >>= 4;
+    return tmp & 0xfff;
 }
 
 /* Write a baseband mode packet into the block.  Includes a
  * corner-turn (aka transpose) of dimension nchan.
  */
 static void write_baseband_packet_to_block_from_pktsock_frame(
-        struct datablock_stats *d, unsigned char *p_frame, int nchan)
+        struct datablock_stats *d, unsigned char *p_frame,
+        int obsschan,
+        int obsnchan,
+        int ntime_per_block)
 {
     if(d->block_idx < 0) {
         hashpipe_error(__FUNCTION__, "d->block_idx == %d", d->block_idx);
@@ -224,14 +239,29 @@ static void write_baseband_packet_to_block_from_pktsock_frame(
     if(block_packet_check(d, seq_num) != 0) {
         hashpipe_error("hpguppi_mb1_net_thread",
                 "seq_num %lld does not belong in block %d (%lld[+%d])",
-                seq_num, d->block_idx, d->packet_idx, d->packets_per_block);
+                seq_num, d->block_idx, d->packet_idx, d->seqnums_per_block);
         return;
     }
 
-    int block_pkt_idx = seq_num - d->packet_idx;
-    hpguppi_udp_packet_data_copy_transpose_from_payload(
+    int block_chan = hpguppi_pktsock_hdr_chan(p_frame) - obsschan;
+    if(block_chan > obsnchan) {
+        // Should "never" happen
+        hashpipe_warn("hpguppi_mb1_net_thread",
+                "packet channel %d not in range [%d,%d)",
+                hpguppi_pktsock_hdr_chan(p_frame),
+                obsschan, obsschan+obsnchan);
+        block_chan %= obsnchan;
+    }
+
+    int block_time = seq_num - d->packet_idx;
+    if(block_time >= ntime_per_block) {
+        // Should "never" happen (already checked above)
+        block_time %= ntime_per_block;
+    }
+
+    hpguppi_s6_packet_data_copy_transpose_from_payload(
             hpguppi_databuf_data(d->db, d->block_idx),
-            nchan, block_pkt_idx, d->packets_per_block,
+            block_chan, block_time, ntime_per_block,
             (char *)PKT_UDP_DATA(p_frame),
             (size_t)PKT_UDP_SIZE(p_frame));
 
@@ -259,8 +289,6 @@ static int init(hashpipe_thread_args_t *args)
     int nbits=8;
     int npol=4;
     double obsbw=187.5;
-    int obsnchan=64;
-    int obsschan=0;
     int overlap=0;
     double tbin=0.0;
     char obs_mode[80];
@@ -297,7 +325,7 @@ static int init(hashpipe_thread_args_t *args)
     hashpipe_status_t st = args->st;
 
     hashpipe_status_lock_safe(&st);
-    // Get network parameters (BINDHOST, BINDPORT, PKTFMT)
+    // Get network parameters (BINDHOST, BINDPORT, PKTFMT, OBSNCHAN, OBSSCHAN)
     hpguppi_read_pktsock_params(st.buf, p_psp);
     // Get info from status buffer if present (no change if not present)
     hgeti4(st.buf, "BLOCSIZE", &blocsize);
@@ -305,12 +333,10 @@ static int init(hashpipe_thread_args_t *args)
     hgeti4(st.buf, "NBITS", &nbits);
     hgeti4(st.buf, "NPOL", &npol);
     hgetr8(st.buf, "OBSBW", &obsbw);
-    hgeti4(st.buf, "OBSNCHAN", &obsnchan);
-    hgeti4(st.buf, "OBSSCHAN", &obsschan);
     hgeti4(st.buf, "OVERLAP", &overlap);
     hgets(st.buf, "OBS_MODE", 80, obs_mode);
     // Calculate TBIN
-    tbin = obsnchan / obsbw / 1e6;
+    tbin = p_psp->obsnchan / obsbw / 1e6;
     // Store bind host/port info etc in status buffer
     hputs(st.buf, "BINDHOST", p_psp->ifname);
     hputi4(st.buf, "BINDPORT", p_psp->port);
@@ -320,12 +346,19 @@ static int init(hashpipe_thread_args_t *args)
     hputi4(st.buf, "NBITS", nbits);
     hputi4(st.buf, "NPOL", npol);
     hputr8(st.buf, "OBSBW", obsbw);
-    hputi4(st.buf, "OBSNCHAN", obsnchan);
-    hputi4(st.buf, "OBSSCHAN", obsschan);
+    hputi4(st.buf, "OBSNCHAN", p_psp->obsnchan);
+    hputi4(st.buf, "OBSSCHAN", p_psp->obsschan);
     hputi4(st.buf, "OVERLAP", overlap);
+    // Force PKTFMT to be "S6"
+    hputs(st.buf, "PKTFMT", "S6");
     hputr8(st.buf, "TBIN", tbin);
     hputs(st.buf, "OBS_MODE", obs_mode);
     hashpipe_status_unlock_safe(&st);
+
+    // Force PKTFMT to be "S6"
+    strcpy(p_psp->packet_format, "S6");
+    // Calculate packet size from OBSNCHAN
+    p_psp->packet_size = (p_psp->obsnchan/8/2) * 8 + 16;
 
     // Set up pktsock.  Make frame_size be a divisor of block size so that
     // frames will be contiguous in mapped mempory.  block_size must also be a
@@ -406,29 +439,35 @@ static void *run(hashpipe_thread_args_t * args)
 
     /* Figure out size of data in each packet, number of packets
      * per block, etc.  Changing packet size during an obs is not
-     * recommended.
+     * supported.
      */
     int block_size = BLOCK_DATA_SIZE;
-    size_t packet_data_size = hpguppi_udp_packet_datasize(p_ps_params->packet_size);
-    if (use_parkes_packets)
-        packet_data_size = parkes_udp_packet_datasize(p_ps_params->packet_size);
-    if (hgeti4(status_buf, "BLOCSIZE", &block_size)==0) {
-            block_size = BLOCK_DATA_SIZE;
-            hputi4(status_buf, "BLOCSIZE", block_size);
-    } else {
-        if (block_size > BLOCK_DATA_SIZE) {
-            hashpipe_error("hpguppi_mb1_net_thread", "BLOCSIZE > databuf block_size");
-            block_size = BLOCK_DATA_SIZE;
-            hputi4(status_buf, "BLOCSIZE", block_size);
-        }
-    }
-    unsigned packets_per_block = block_size / packet_data_size;
+    int ntime_per_block = BLOCK_DATA_SIZE / (4 * p_ps_params->obsnchan);
 
-    const uint64_t samples_per_second = 3UL*1000*1000*1000; // 3 GHz
-    const uint64_t samples_per_spectrum = 1024;
-    const uint64_t spectra_per_packet = 32;
+    // Set ntime_per_block to closest power of 2 less than or equal to
+    // ntime_per_block.
+    unsigned i = 0;
+    while(ntime_per_block != 1) {
+        ntime_per_block >>= 1;
+        i++;
+    }
+    ntime_per_block <<= i;
+
+    block_size = 4 * p_ps_params->obsnchan * ntime_per_block;
+
+    if (block_size > BLOCK_DATA_SIZE) {
+        hashpipe_error("hpguppi_mb1_net_thread", "BLOCSIZE > databuf block_size");
+        block_size = BLOCK_DATA_SIZE;
+        ntime_per_block = BLOCK_DATA_SIZE / (4 * p_ps_params->obsnchan);
+    }
+    hputi4(status_buf, "BLOCSIZE", block_size);
+
+    size_t packet_data_size = p_ps_params->packet_size - 16;
+    unsigned packets_per_block = block_size / packet_data_size;
+    unsigned seqnums_per_block = packets_per_block / 8;
 
     double dwell_seconds = 0.0;
+    double tbin = 1.0e6; // Dummy default value
     uint64_t dwell_blocks = 0;
 
     /* If we're in baseband mode, figure out how much to overlap
@@ -454,7 +493,6 @@ static void *run(hashpipe_thread_args_t * args)
     }
 
     /* List of databuf blocks currently in use */
-    unsigned i;
     const int nblock = 2;
     struct datablock_stats blocks[nblock];
     for (i=0; i<nblock; i++)
@@ -589,26 +627,26 @@ static void *run(hashpipe_thread_args_t * args)
         // Get packet's sequence number
         seq_num = hpguppi_pktsock_seq_num(p_frame);
 
-        // Update PKTIDX in status buffer if seq_num % packets_per_block == 0
+        // Update PKTIDX in status buffer if seq_num % seqnums_per_block == 0
         // and read PKTSTART, DWELL to calculate start/stop seq numbers.
-        if(seq_num % packets_per_block == 0) {
+        if(seq_num % seqnums_per_block == 0) { // TODO Only do for first packet with matching seq_num
             hashpipe_status_lock_safe(&st);
             hputi8(st.buf, "PKTIDX", seq_num);
             hgeti8(st.buf, "PKTSTART", (long long int *)&start_seq_num);
-            start_seq_num -= start_seq_num % packets_per_block;
+            start_seq_num -= start_seq_num % seqnums_per_block;
             hputi8(st.buf, "PKTSTART", start_seq_num);
             hgetr8(st.buf, "DWELL", &dwell_seconds);
+            hgetr8(st.buf, "TBIN", &tbin);
             // Dwell blocks is equal to:
             //
-            //           dwell_seconds * samples/second
-            //     -------------------------------------------
-            //     samples/spectrum * spectra/pkt * pkts/block
+            //       dwell_seconds
+            //     ------------------
+            //     tbin * ntime/block
             //
             // To get an integer number of blocks, simply truncate
-            dwell_blocks = trunc(dwell_seconds * samples_per_second /
-                    (samples_per_spectrum * spectra_per_packet * packets_per_block));
+            dwell_blocks = trunc(dwell_seconds / (tbin * ntime_per_block));
 
-            stop_seq_num = start_seq_num + packets_per_block * dwell_blocks;
+            stop_seq_num = start_seq_num + seqnums_per_block * dwell_blocks;
             hputi8(st.buf, "PKTSTOP", stop_seq_num);
             hashpipe_status_unlock_safe(&st);
         }
@@ -636,7 +674,7 @@ static void *run(hashpipe_thread_args_t * args)
 
         /* Check seq num diff */
         seq_num_diff = seq_num - last_seq_num;
-        if (seq_num_diff<=0) {
+        if (seq_num_diff<0) {
             if (seq_num_diff<-1024) {
                 force_new_block=1;
             } else if (seq_num_diff==0) {
@@ -655,10 +693,11 @@ static void *run(hashpipe_thread_args_t * args)
             if(npacket_total == 0) {
                 npacket_total = 1;
                 ndropped_total = 0;
-            } else {
-                npacket_total += seq_num_diff;
-                ndropped_total += seq_num_diff - 1;
+            } else if(seq_num_diff > 1) {
+                npacket_total += 8 * (seq_num_diff - 1);
+                ndropped_total += 8 * (seq_num_diff - 1);
             }
+            npacket_total++;
         }
         last_seq_num = seq_num;
 
@@ -732,7 +771,7 @@ static void *run(hashpipe_thread_args_t * args)
             curdata = hpguppi_databuf_data(db, lblock->block_idx);
             curheader = hpguppi_databuf_header(db, lblock->block_idx);
             nextblock_seq_num = lblock->packet_idx
-                + packets_per_block - overlap_packets;
+                + seqnums_per_block - overlap_packets;
 
             // If new block is forced, any current blocks on the stack are
             // finalized/reset. [TODO: Is this really needed?]
@@ -749,24 +788,6 @@ static void *run(hashpipe_thread_args_t * args)
             hashpipe_status_lock_safe(&st);
             memcpy(status_buf, st.buf, HASHPIPE_STATUS_TOTAL_SIZE);
             hashpipe_status_unlock_safe(&st);
-
-            /* block size possibly changed on new obs */
-            /* TODO: what about overlap...
-             * Also, should this even be allowed ?
-             */
-            if (force_new_block) {
-                if (hgeti4(status_buf, "BLOCSIZE", &block_size)==0) {
-                        block_size = BLOCK_DATA_SIZE;
-                } else {
-                    if (block_size > BLOCK_DATA_SIZE) {
-                        hashpipe_error("hpguppi_mb1_net_thread",
-                                "BLOCSIZE > databuf block_size");
-                        block_size = BLOCK_DATA_SIZE;
-                    }
-                }
-                packets_per_block = block_size / packet_data_size;
-            }
-            hputi4(status_buf, "BLOCSIZE", block_size);
 
             /* Wait for new block to be free, then clear it
              * if necessary and fill its header with new values.
@@ -811,7 +832,10 @@ static void *run(hashpipe_thread_args_t * args)
             if ((blocks[i].block_idx>=0)
             && (block_packet_check(&blocks[i],seq_num)==0)) {
                 write_baseband_packet_to_block_from_pktsock_frame(
-                    &blocks[i], p_frame, nchan);
+                    &blocks[i], p_frame,
+                    p_ps_params->obsschan,
+                    p_ps_params->obsnchan,
+                    ntime_per_block);
             }
         }
 
