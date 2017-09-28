@@ -308,6 +308,47 @@ void hpguppi_udp_packet_data_copy_transpose_from_payload(char *databuf, int ncha
 #endif
 }
 
+void hpguppi_s6_packet_data_copy_transpose_from_payload(char *databuf, int block_chan,
+        unsigned block_time, unsigned ntime_per_block,
+        const char *payload, size_t payload_size)
+{
+    const size_t bytes_per_sample = 4; // Xr,Xi,Yr,Yi
+    const unsigned chan_per_packet = (payload_size - 16) / bytes_per_sample;
+
+    const uint64_t *iptr = (const uint64_t *)(payload + 8);
+    uint64_t d;
+
+    uint16_t *optr = (uint16_t *)(databuf
+                   + block_chan * ntime_per_block * bytes_per_sample
+                   + block_time * bytes_per_sample);
+
+    unsigned ichan;
+
+    // Arrange data from network packet format e.g:
+    // X0r|X0i|X1r|X1i|Y0r|Y0i|Y1r|Y1i
+    // X2r|X2i|X3r|X3i|Y2r|Y2i|Y3r|Y3i
+    // ...
+
+    // Into the format:
+    // S0C0P0123, S1C0P0123, S2C0P0123, ... SmC0P0123
+    // S0C1P0123/ S1C1P0123, S2C1P0123, ... SmC1P0123
+    // S0C2P0123/ S1C2P0123, S2C2P0123, ... SmC1P0123
+    // S0C3P0123/ S1C3P0123, S2C3P0123, ... SmC1P0123
+    /// ...
+
+    /* New improved more cache friendly version on CPU */
+    for (ichan=0; ichan<chan_per_packet; ++ichan)
+    {
+        d = *iptr++;
+        *optr = ((d>>48) & 0xffff)
+              | ((d>>16) & 0xffff);
+        optr += (ntime_per_block * bytes_per_sample) / sizeof(uint16_t);
+        *optr = ((d>>32) & 0xffff)
+              | ((d    ) & 0xffff);
+        optr += (ntime_per_block * bytes_per_sample) / sizeof(uint16_t);
+    }
+}
+
 size_t parkes_udp_packet_datasize(size_t packet_size) {
     return(packet_size - sizeof(unsigned long long));
 }

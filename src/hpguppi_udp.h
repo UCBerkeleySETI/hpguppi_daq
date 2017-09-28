@@ -82,6 +82,9 @@ void hpguppi_udp_packet_data_copy_transpose(char *databuf, int nchan,
 void hpguppi_udp_packet_data_copy_transpose_from_payload(char *databuf, int nchan,
         unsigned block_pkt_idx, unsigned packets_per_block,
         const char *payload, size_t payload_size);
+void hpguppi_s6_packet_data_copy_transpose_from_payload(char *databuf, int block_chan,
+        unsigned block_time, unsigned ntime_per_block,
+        const char *payload, size_t payload_size);
 
 /* Close out socket, etc */
 int hpguppi_udp_close(struct hpguppi_udp_params *p);
