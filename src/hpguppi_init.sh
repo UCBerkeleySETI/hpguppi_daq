@@ -82,7 +82,7 @@ function init() {
   echo taskset $mask \
   hashpipe -p hpguppi_daq -I $instance \
     -o BINDHOST=$bindhost \
-    -o BINDPORT=60000 \
+    -o BINDPORT=$bindport \
     -o DATADIR=$dir \
     ${@} \
     -c $netcpu hpguppi_net_thread \
@@ -91,7 +91,7 @@ function init() {
   taskset $mask \
   hashpipe -p hpguppi_daq -I $instance \
     -o BINDHOST=$bindhost \
-    -o BINDPORT=60000 \
+    -o BINDPORT=$bindport \
     -o DATADIR=$dir \
     ${@} \
     -c $netcpu $net_thread \
@@ -101,14 +101,10 @@ function init() {
     2> ${hostname}.$instance.err &
 }
 
-if [ -z "$1" ]
-then
-  echo "Usage: $(basename $0) INSTANCE_ID [...]"
-  exit 1
-fi
-
+redis_sync_key=sync_time
 net_thread=hpguppi_net_thread
 out_thread=hpguppi_rawdisk_thread
+bindport=60000
 
 if [ "$1" = 'fakefake' ]
 then
@@ -119,10 +115,23 @@ elif [ "$1" = 'fake' ]
 then
   net_thread=hpguppi_fake_net_thread
   shift
+elif [ "$1" = 'mb1' ]
+then
+  redis_sync_key=s6_mcount_0
+  net_thread=hpguppi_mb1_net_thread
+  bindport=$((0x5336)) # ASCII 0x53 0x36 is "S6" (for SEREDIP6)
+  shift
 elif echo "$1" | grep -q 'thread'
 then
   out_thread="$1"
   shift
+fi
+
+# Exit if no instance id is given
+if [ -z "$1" ]
+then
+  echo "Usage: $(basename $0) [mb1|fake|fakefake] INSTANCE_ID [...] [OPTIONS]"
+  exit 1
 fi
 
 echo using net_thread $net_thread
@@ -142,7 +151,7 @@ do
 done
 
 # Get sync time from redis
-sync_time=`redis-cli -h redishost get sync_time | tr -d '"'`
+sync_time=`redis-cli -h redishost get $redis_sync_key | tr -d '"'`
 
 for instidx in $instance_ids
 do
