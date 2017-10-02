@@ -5,21 +5,51 @@ PATH="$(dirname $0):${PATH}"
 
 hostname=`hostname -s`
 
+cores_per_cpu=`grep cpu.cores /proc/cpuinfo | awk 'NR==1{print $NF}'`
+
+case $cores_per_cpu in
+  6)
+    # We use a dual hexa-core CPU system with everything on the second socket (CPUs 6-11),
+    # with CPU 6 being reserved for NIC IRQs.  This leads to the following CPU mask:
+    #
+    # 1111 1100 0000 0000
+    # 5432 1098 7654 3210
+    # ---- ---- ---- ----
+    # 0000 1111 1000 0000 = 0x0f80
+    NET0CPU=7
+    OUT0CPU=8
+    NET1CPU=9
+    OUT1CPU=10
+    MASK=0x0f80
+    ;;
+  8)
+    # We use a dual octa-core CPU system with everything on the second socket (CPUs 8-15),
+    # with CPU 8 being reserved for NIC IRQs.  This leads to the following CPU mask:
+    #
+    # 1111 1100 0000 0000
+    # 5432 1098 7654 3210
+    # ---- ---- ---- ----
+    # 1111 1110 0000 0000 = 0xfe00
+    NET0CPU=9
+    OUT0CPU=10
+    NET1CPU=11
+    OUT1CPU=12
+    MASK=0xfe00
+    ;;
+  *)
+    echo "$cores_per_cpu cores per cpu is not yet supported by $0"
+    exit 1
+    ;;
+esac
+
 instances=(
   # Setup parameters for two instances.
   #
-  # We use a dual hexa-core CPU system with everything on the second socket (CPUs 6-11),
-  # with CPU 6 being reserved for NIC IRQs.  This leads to the following CPU mask:
   #
-  # 1100 0000 0000
-  # 1098 7654 3210
-  # ---- ---- ----
-  # 1111 1000 0000 = 0xf80
-  #
-  #                bind  NET  OUT
-  #  dir     mask  host  CPU  CPU
-  "/datax   0xf80  eth4   7    8"  # Instance 0, eth4
-  "/datax2  0xf80  eth5   9   10"  # Instance 1, eth5
+  #                bind     NET       OUT
+  #  dir     mask  host     CPU       CPU
+  "/datax   $MASK  eth4  $NET0CPU  $OUT0CPU"  # Instance 0, eth4
+  "/datax2  $MASK  eth5  $NET1CPU  $OUT1CPU"  # Instance 1, eth5
 )
 
 function init() {
