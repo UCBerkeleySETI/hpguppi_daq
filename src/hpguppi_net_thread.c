@@ -365,6 +365,9 @@ static int init(hashpipe_thread_args_t *args, const int fake)
     hputi4(st.buf, "OVERLAP", overlap);
     hputr8(st.buf, "TBIN", tbin);
     hputs(st.buf, "OBS_MODE", obs_mode);
+    // Data are in time-major order (i.e. time dimension changes faster than
+    // channel dimension), so specify that data are NOT in channel major order.
+    hputi4(st.buf, "CHANMAJ", 0);
     hashpipe_status_unlock_safe(&st);
 
     // Set up pktsock.  Make frame_size be a divisor of block size so that

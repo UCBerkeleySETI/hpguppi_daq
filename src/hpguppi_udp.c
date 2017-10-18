@@ -308,17 +308,78 @@ void hpguppi_udp_packet_data_copy_transpose_from_payload(char *databuf, int ncha
 #endif
 }
 
+void hpguppi_s6_packet_data_copy_from_payload(char *databuf, int block_chan,
+        unsigned block_time, unsigned obsnchan,
+        const char *payload, size_t payload_size)
+{
+    const size_t bytes_per_sample = 4; // Xr,Xi,Yr,Yi
+    // -16 for S6 header and footer bytes
+    const unsigned chan_per_packet = (payload_size - 16) / bytes_per_sample;
+    unsigned ichan;
+
+#if 0
+    hashpipe_warn("hpguppi_s6_packet_data_copy_transpose_from_payload",
+            "databuf %lp block_chan %d block_time %d ntime_per_block %d payload_size %d",
+            databuf, block_chan, block_time, ntime_per_block, payload_size);
+#endif // 0
+
+#ifndef DEBUG_S6_COPY
+    const uint64_t *iptr = (const uint64_t *)(payload + 8);
+#endif // DEBUG_S6_COPY
+
+    uint32_t *optr = (uint32_t *)(databuf
+                   + block_time * obsnchan * bytes_per_sample
+                   + block_chan * bytes_per_sample);
+
+    // Arrange data from network packet format e.g:
+    //
+    // X0r|X0i|X1r|X1i|Y0r|Y0i|Y1r|Y1i  == [SsC0P0, SsC1P0, SsC0P1, SsC1P1]
+    // X2r|X2i|X3r|X3i|Y2r|Y2i|Y3r|Y3i  == [SsC2P0, SsC3P0, SsC2P1, SsC3P1]
+    // ...
+
+    // Into the format:
+    //
+    // S0C0P01, S0C1P01, S0C2P01, ... S0CnP01
+    // S1C0P01, S1C1P01, S1C2P01, ... S1CnP01
+    // S2C0P01, S2C1P01, S2C2P01, ... S2CnP01
+    // S3C0P01, S3C1P01, S3C2P01, ... S3CnP01
+    /// ...
+
+#if 0
+    memcpy(optr, iptr, payload_size - 16);
+#else
+    for (ichan=0; ichan<chan_per_packet/2; ++ichan)
+    {
+        uint64_t d = *iptr++;
+
+        *optr++ = ((d>>32) & 0xffff0000)
+                | ((d>>16) & 0x0000ffff);
+
+        *optr++ = ((d>>16) & 0xffff0000)
+                | ((d    ) & 0x0000ffff);
+    }
+#endif
+}
+
 void hpguppi_s6_packet_data_copy_transpose_from_payload(char *databuf, int block_chan,
         unsigned block_time, unsigned ntime_per_block,
         const char *payload, size_t payload_size)
 {
     const size_t bytes_per_sample = 4; // Xr,Xi,Yr,Yi
+    // -16 for S6 header and footer bytes
     const unsigned chan_per_packet = (payload_size - 16) / bytes_per_sample;
 
-    const uint64_t *iptr = (const uint64_t *)(payload + 8);
-    uint64_t d;
+#if 0
+    hashpipe_warn("hpguppi_s6_packet_data_copy_from_payload",
+            "databuf %lp block_chan %d block_time %d ntime_per_block %d payload_size %d",
+            databuf, block_chan, block_time, ntime_per_block, payload_size);
+#endif // 0
 
-    uint16_t *optr = (uint16_t *)(databuf
+#ifndef DEBUG_S6_COPY
+    const uint64_t *iptr = (const uint64_t *)(payload + 8);
+#endif // DEBUG_S6_COPY
+
+    uint32_t *optr = (uint32_t *)(databuf
                    + block_chan * ntime_per_block * bytes_per_sample
                    + block_time * bytes_per_sample);
 
@@ -330,22 +391,39 @@ void hpguppi_s6_packet_data_copy_transpose_from_payload(char *databuf, int block
     // ...
 
     // Into the format:
-    // S0C0P0123, S1C0P0123, S2C0P0123, ... SmC0P0123
-    // S0C1P0123/ S1C1P0123, S2C1P0123, ... SmC1P0123
-    // S0C2P0123/ S1C2P0123, S2C2P0123, ... SmC1P0123
-    // S0C3P0123/ S1C3P0123, S2C3P0123, ... SmC1P0123
+    // S0C0P01, S1C0P01, S2C0P01, ... SmC0P01
+    // S0C1P01, S1C1P01, S2C1P01, ... SmC1P01
+    // S0C2P01, S1C2P01, S2C2P01, ... SmC1P01
+    // S0C3P01, S1C3P01, S2C3P01, ... SmC1P01
     /// ...
 
-    /* New improved more cache friendly version on CPU */
-    for (ichan=0; ichan<chan_per_packet; ++ichan)
+    for (ichan=0; ichan<chan_per_packet/2; ++ichan)
     {
-        d = *iptr++;
-        *optr = ((d>>48) & 0xffff)
-              | ((d>>16) & 0xffff);
-        optr += (ntime_per_block * bytes_per_sample) / sizeof(uint16_t);
-        *optr = ((d>>32) & 0xffff)
-              | ((d    ) & 0xffff);
-        optr += (ntime_per_block * bytes_per_sample) / sizeof(uint16_t);
+#ifndef DEBUG_S6_COPY
+        uint64_t d = *iptr++;
+        *optr = ((d>>32) & 0xffff0000)
+              | ((d>>16) & 0x0000ffff);
+#else
+        // Store lower 16 bits of block time and channel number packed as two
+        // big endian 16 bit values.  This is intended to facilitate debugging
+        // via dumping the data buffers.
+        *optr = htonl(
+                  ((block_time & 0xffff) << 16) | (block_chan + 2*ichan)
+                );
+#endif // DEBUG_S6_COPY
+        optr += (ntime_per_block * bytes_per_sample) / sizeof(uint32_t);
+#ifndef DEBUG_S6_COPY
+        *optr = ((d>>16) & 0xffff0000)
+              | ((d    ) & 0x0000ffff);
+#else
+        // Store lower 16 bits of block time and channel number packed as two
+        // big endian 16 bit values.  This is intended to facilitate debugging
+        // via dumping the data buffers.
+        *optr = htonl(
+                  ((block_time & 0xffff) << 16) | (block_chan + 2*ichan + 1)
+                );
+#endif // DEBUG_S6_COPY
+        optr += (ntime_per_block * bytes_per_sample) / sizeof(uint32_t);
     }
 }
 

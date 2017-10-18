@@ -85,7 +85,7 @@ function init() {
     -o BINDPORT=$bindport \
     -o DATADIR=$dir \
     ${@} \
-    -c $netcpu hpguppi_net_thread \
+    -c $netcpu $net_thread \
     -c $outcpu $out_thread
 
   taskset $mask \

@@ -29,7 +29,8 @@
 
 #define PKTSOCK_BYTES_PER_FRAME (16384)
 #define PKTSOCK_FRAMES_PER_BLOCK (8)
-#define PKTSOCK_NBLOCKS (800)
+//#define PKTSOCK_NBLOCKS (800)
+#define PKTSOCK_NBLOCKS (800*12)
 #define PKTSOCK_NFRAMES (PKTSOCK_FRAMES_PER_BLOCK * PKTSOCK_NBLOCKS)
 
 #define ELAPSED_NS(start,stop) \
@@ -97,8 +98,6 @@ struct datablock_stats {
     int seqnums_per_block;            // Total number of seqnums to go in the block
     int overlap_packets;              // Overlap between blocks in packets
     int npacket;                      // Number of packets filled so far
-    int ndropped;                     // Number of dropped packets so far
-    uint64_t last_pkt;                // Last packet seq number written to block
 };
 
 #if 0
@@ -126,8 +125,6 @@ int block_packet_check(struct datablock_stats *d,
 static void reset_stats(struct datablock_stats *d)
 {
     d->npacket=0;
-    d->ndropped=0;
-    d->last_pkt=0;
 }
 
 /* Reset block params */
@@ -144,7 +141,7 @@ static void init_block(struct datablock_stats *d, struct hpguppi_input_databuf *
 {
     d->db = db;
     d->packet_data_size = packet_data_size;
-    d->packets_per_block = packets_per_block & 7;  // Eight packets will have
+    d->packets_per_block = packets_per_block & ~7; // Eight packets will have
     d->seqnums_per_block = packets_per_block >> 3; // a common pktidx (aka mcount)
     d->overlap_packets = overlap_packets;
     reset_block(d);
@@ -157,11 +154,16 @@ static void finalize_block(struct datablock_stats *d)
         hashpipe_error(__FUNCTION__, "d->block_idx == %d", d->block_idx);
         pthread_exit(NULL);
     }
+    npacket_total += d->npacket;
+    ndropped_total += d->packets_per_block - d->npacket;
     char *header = hpguppi_databuf_header(d->db, d->block_idx);
+    char dropstat[128];
+    sprintf(dropstat, "%d/%d", d->packets_per_block-d->npacket, d->packets_per_block);
     hputi8(header, "PKTIDX", d->packet_idx);
     hputi4(header, "PKTSIZE", d->packet_data_size);
     hputi4(header, "NPKT", d->npacket);
-    hputi4(header, "NDROP", d->ndropped);
+    hputi4(header, "NDROP", d->packets_per_block - d->npacket);
+    hputs(header, "DROPSTAT", dropstat);
     hpguppi_input_databuf_set_filled(d->db, d->block_idx);
 }
 
@@ -251,34 +253,35 @@ static void write_baseband_packet_to_block_from_pktsock_frame(
                 hpguppi_pktsock_hdr_chan(p_frame),
                 obsschan, obsschan+obsnchan);
         block_chan %= obsnchan;
+    } else if(block_chan < 0) {
+        hashpipe_error("hpguppi_mb1_net_thread", "Block chan less than 0! pkt chan %lu obsschan %lu", hpguppi_pktsock_hdr_chan(p_frame), obsschan);
+        exit(1);
     }
 
     int block_time = seq_num - d->packet_idx;
     if(block_time >= ntime_per_block) {
         // Should "never" happen (already checked above)
         block_time %= ntime_per_block;
+    } else if(block_time < 0) {
+        hashpipe_error("hpguppi_mb1_net_thread", "Block time less than 0! seq_num %lu d->packet_idx %lu", seq_num, d->packet_idx);
+        exit(1);
     }
 
+#if 0
     hpguppi_s6_packet_data_copy_transpose_from_payload(
             hpguppi_databuf_data(d->db, d->block_idx),
             block_chan, block_time, ntime_per_block,
             (char *)PKT_UDP_DATA(p_frame),
-            (size_t)PKT_UDP_SIZE(p_frame));
+            (size_t)PKT_UDP_SIZE(p_frame)-8); // -8 for UDP header bytes
+#else
+    hpguppi_s6_packet_data_copy_from_payload(
+            hpguppi_databuf_data(d->db, d->block_idx),
+            block_chan, block_time, obsnchan,
+            (char *)PKT_UDP_DATA(p_frame),
+            (size_t)PKT_UDP_SIZE(p_frame)-8); // -8 for UDP header bytes
+#endif
 
-    /* Consider any skipped packets to have been dropped,
-     * update counters.
-     */
-    if (d->last_pkt < d->packet_idx) d->last_pkt = d->packet_idx;
-
-    //if (seq_num == d->last_pkt + 1) {
-    //    d->npacket++;
-    //} else {
-        // Count "dropped" packets as packets and as dropped packets
-        d->npacket += seq_num - d->last_pkt;
-        d->ndropped += seq_num - d->last_pkt - 1;
-    //}
-
-    d->last_pkt = seq_num;
+    d->npacket++;
 }
 
 static int init(hashpipe_thread_args_t *args)
@@ -353,6 +356,9 @@ static int init(hashpipe_thread_args_t *args)
     hputs(st.buf, "PKTFMT", "S6");
     hputr8(st.buf, "TBIN", tbin);
     hputs(st.buf, "OBS_MODE", obs_mode);
+    // Data are in channel-major order
+    // (i.e. channel dimension changes faster than time dimension)
+    hputi4(st.buf, "CHANMAJ", 1);
     hashpipe_status_unlock_safe(&st);
 
     // Force PKTFMT to be "S6"
@@ -460,11 +466,20 @@ static void *run(hashpipe_thread_args_t * args)
         block_size = BLOCK_DATA_SIZE;
         ntime_per_block = BLOCK_DATA_SIZE / (4 * p_ps_params->obsnchan);
     }
-    hputi4(status_buf, "BLOCSIZE", block_size);
+
+    // Update BLOCSIZE in status buffer
+    hashpipe_status_lock_safe(&st);
+    hputi4(st.buf, "BLOCSIZE", block_size);
+    hashpipe_status_unlock_safe(&st);
 
     size_t packet_data_size = p_ps_params->packet_size - 16;
     unsigned packets_per_block = block_size / packet_data_size;
     unsigned seqnums_per_block = packets_per_block / 8;
+    hashpipe_warn("hpguppi_mb1_net_thread", "block_size %lu", block_size);
+    hashpipe_warn("hpguppi_mb1_net_thread", "ntime_per_block%lu", ntime_per_block);
+    hashpipe_warn("hpguppi_mb1_net_thread", "packet_data_size %lu", packet_data_size);
+    hashpipe_warn("hpguppi_mb1_net_thread", "packets_per_block %u", packets_per_block);
+    hashpipe_warn("hpguppi_mb1_net_thread", "seqnums_per_block %u", seqnums_per_block);
 
     double dwell_seconds = 0.0;
     double tbin = 1.0e6; // Dummy default value
@@ -479,7 +494,8 @@ static void *run(hashpipe_thread_args_t * args)
             overlap_packets = 0; // Default to no overlap
         } else {
             // XXX This is only true for 8-bit, 2-pol data:
-            int samples_per_packet = packet_data_size / nchan / (size_t)4;
+            int samples_per_packet = packet_data_size / (nchan/8) / (size_t)4;
+            hashpipe_warn("hpguppi_mb1_net_thread", "samples_per_packet=%u", samples_per_packet);
             if (overlap_packets % samples_per_packet) {
                 hashpipe_error("hpguppi_mb1_net_thread",
                         "Overlap is not an integer number of packets");
@@ -516,6 +532,11 @@ static void *run(hashpipe_thread_args_t * args)
     unsigned force_new_block=0, waiting=-1;
     enum run_states state = IDLE;
 
+    // Timing variables
+    struct timespec ts_start, ts_stop;
+    uint64_t elapsed_bytes=0, elapsed_ns=0;
+    uint32_t ps_pkts=0, ps_drops=0;
+
     // Heartbeat variables
     time_t lasttime = 0;
     time_t curtime = 0;
@@ -534,6 +555,11 @@ static void *run(hashpipe_thread_args_t * args)
         do {
             p_frame = hashpipe_pktsock_recv_udp_frame(
                 &p_ps_params->ps, p_ps_params->port, 1000); // 1 second timeout
+
+            // Get start-of-processing time if we got a packet
+            if(p_frame) {
+                clock_gettime(CLOCK_MONOTONIC, &ts_start);
+            }
 
             // Heartbeat update?
             time(&curtime);
@@ -628,8 +654,12 @@ static void *run(hashpipe_thread_args_t * args)
         seq_num = hpguppi_pktsock_seq_num(p_frame);
 
         // Update PKTIDX in status buffer if seq_num % seqnums_per_block == 0
-        // and read PKTSTART, DWELL to calculate start/stop seq numbers.
-        if(seq_num % seqnums_per_block == 0) { // TODO Only do for first packet with matching seq_num
+        // and the header's channel number is the same as obsschan.
+        // Also read PKTSTART, DWELL to calculate start/stop seq numbers.
+        if(seq_num % seqnums_per_block == 0
+        && hpguppi_pktsock_hdr_chan(p_frame) == p_ps_params->obsschan) {
+            // Get packet stats
+            hashpipe_pktsock_stats(&p_ps_params->ps, &ps_pkts, &ps_drops);
             hashpipe_status_lock_safe(&st);
             hputi8(st.buf, "PKTIDX", seq_num);
             hgeti8(st.buf, "PKTSTART", (long long int *)&start_seq_num);
@@ -648,6 +678,18 @@ static void *run(hashpipe_thread_args_t * args)
 
             stop_seq_num = start_seq_num + seqnums_per_block * dwell_blocks;
             hputi8(st.buf, "PKTSTOP", stop_seq_num);
+
+            // Store stats
+            hputi4(st.buf, "PSPKTS", ps_pkts);
+            hputi4(st.buf, "PSDRPS", ps_drops);
+            
+            // Calculate processing speed in Gbps (8*bytes/ns)
+            hputi8(st.buf, "ELPSBITS", elapsed_bytes << 3);
+            hputi8(st.buf, "ELPSNS", elapsed_ns);
+            hputr4(st.buf, "NETGBPS", 8.0*elapsed_bytes / elapsed_ns);
+            elapsed_bytes = 0;
+            elapsed_ns = 0;
+
             hashpipe_status_unlock_safe(&st);
         }
 
@@ -690,14 +732,6 @@ static void *run(hashpipe_thread_args_t * args)
             }
         } else {
             force_new_block=0;
-            if(npacket_total == 0) {
-                npacket_total = 1;
-                ndropped_total = 0;
-            } else if(seq_num_diff > 1) {
-                npacket_total += 8 * (seq_num_diff - 1);
-                ndropped_total += 8 * (seq_num_diff - 1);
-            }
-            npacket_total++;
         }
         last_seq_num = seq_num;
 
@@ -708,20 +742,22 @@ static void *run(hashpipe_thread_args_t * args)
             if (fblock->npacket)
                 drop_frac_avg = (1.0-drop_lpf)*drop_frac_avg
                     + drop_lpf *
-                    (double)fblock->ndropped /
-                    (double)fblock->npacket;
+                    (double)(fblock->packets_per_block-fblock->npacket) /
+                    (double)fblock->packets_per_block;
 
+            sprintf(netbuf_status, "%d/%d", fblock->packets_per_block-fblock->npacket, fblock->packets_per_block);
             hashpipe_status_lock_safe(&st);
             hputi8(st.buf, "PKTIDX", fblock->packet_idx);
             hputr8(st.buf, "DROPAVG", drop_frac_avg);
             hputr8(st.buf, "DROPTOT",
-                    npacket_total ?
-                    (double)ndropped_total/(double)npacket_total
+                    (ndropped_total+npacket_total) ?
+                    (double)ndropped_total/(double)(ndropped_total+npacket_total)
                     : 0.0);
             hputr8(st.buf, "DROPBLK",
-                    fblock->npacket ?
-                    (double)fblock->ndropped/(double)fblock->npacket
+                    fblock->packets_per_block ?
+                    (double)(fblock->packets_per_block-fblock->npacket)/(double)fblock->packets_per_block
                     : 0.0);
+            hputs(st.buf, "DROPSTAT", netbuf_status);
             hashpipe_status_unlock_safe(&st);
 
             if(state == ARMED && seq_num == start_seq_num) {
@@ -771,7 +807,7 @@ static void *run(hashpipe_thread_args_t * args)
             curdata = hpguppi_databuf_data(db, lblock->block_idx);
             curheader = hpguppi_databuf_header(db, lblock->block_idx);
             nextblock_seq_num = lblock->packet_idx
-                + seqnums_per_block - overlap_packets;
+                + seqnums_per_block - overlap_packets; // Should be overlap_seqnums!
 
             // If new block is forced, any current blocks on the stack are
             // finalized/reset. [TODO: Is this really needed?]
@@ -841,6 +877,12 @@ static void *run(hashpipe_thread_args_t * args)
 
         // Release frame back to ring buffer
         hashpipe_pktsock_release_frame(p_frame);
+
+        clock_gettime(CLOCK_MONOTONIC, &ts_stop);
+
+        // -16 for S6 header and footer
+        elapsed_bytes += p_ps_params->packet_size - 16;
+        elapsed_ns += ELAPSED_NS(ts_start, ts_stop);
 
         /* Will exit if thread has been cancelled */
         pthread_testcancel();
