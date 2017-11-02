@@ -485,7 +485,7 @@ static void *run(hashpipe_thread_args_t * args)
     hashpipe_warn("hpguppi_mb1_net_thread", "packets_per_block %u", packets_per_block);
     hashpipe_warn("hpguppi_mb1_net_thread", "seqnums_per_block %u", seqnums_per_block);
 
-    double dwell_seconds = 0.0;
+    double dwell_seconds = 300.0;
     double tbin = 1.0e6; // Dummy default value
     uint64_t dwell_blocks = 0;
 
@@ -670,6 +670,7 @@ static void *run(hashpipe_thread_args_t * args)
             start_seq_num -= start_seq_num % seqnums_per_block;
             hputi8(st.buf, "PKTSTART", start_seq_num);
             hgetr8(st.buf, "DWELL", &dwell_seconds);
+            hputr8(st.buf, "DWELL", dwell_seconds); // In case it wasn't there
             hgetr8(st.buf, "TBIN", &tbin);
             // Dwell blocks is equal to:
             //
