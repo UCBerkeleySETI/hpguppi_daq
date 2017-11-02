@@ -55,6 +55,7 @@ struct hpguppi_pktsock_params {
     // In "mb1" mode, the `obsnchan` channels are split across 8 packets.
     int obsschan; /* First coarse channel of this instance */
     int obsnchan; /* Total number of coarse channels for this instance */
+    int chperpkt; /* Total number of coarse channels per packet */
 
     // Holds packet socket details
     struct hashpipe_pktsock ps;

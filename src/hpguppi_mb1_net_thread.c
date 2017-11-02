@@ -137,12 +137,12 @@ static void reset_block(struct datablock_stats *d)
 
 /* Initialize block struct */
 static void init_block(struct datablock_stats *d, struct hpguppi_input_databuf *db,
-        size_t packet_data_size, int packets_per_block, int overlap_packets)
+        size_t packet_data_size, int packets_per_block, int packets_per_spectrum, int overlap_packets)
 {
     d->db = db;
     d->packet_data_size = packet_data_size;
-    d->packets_per_block = packets_per_block & ~7; // Eight packets will have
-    d->seqnums_per_block = packets_per_block >> 3; // a common pktidx (aka mcount)
+    d->packets_per_block = packets_per_block; // Eight packets will have
+    d->seqnums_per_block = packets_per_block /packets_per_spectrum; // a common pktidx (aka mcount)
     d->overlap_packets = overlap_packets;
     reset_block(d);
 }
@@ -351,6 +351,7 @@ static int init(hashpipe_thread_args_t *args)
     hputr8(st.buf, "OBSBW", obsbw);
     hputi4(st.buf, "OBSNCHAN", p_psp->obsnchan);
     hputi4(st.buf, "OBSSCHAN", p_psp->obsschan);
+    hputi4(st.buf, "CHPERPKT", p_psp->chperpkt);
     hputi4(st.buf, "OVERLAP", overlap);
     // Force PKTFMT to be "S6"
     hputs(st.buf, "PKTFMT", "S6");
@@ -363,8 +364,8 @@ static int init(hashpipe_thread_args_t *args)
 
     // Force PKTFMT to be "S6"
     strcpy(p_psp->packet_format, "S6");
-    // Calculate packet size from OBSNCHAN
-    p_psp->packet_size = (p_psp->obsnchan/8/2) * 8 + 16;
+    // Calculate packet size from CHPERPKT
+    p_psp->packet_size = p_psp->chperpkt * 4 + 16;
 
     // Set up pktsock.  Make frame_size be a divisor of block size so that
     // frames will be contiguous in mapped mempory.  block_size must also be a
@@ -474,9 +475,10 @@ static void *run(hashpipe_thread_args_t * args)
 
     size_t packet_data_size = p_ps_params->packet_size - 16;
     unsigned packets_per_block = block_size / packet_data_size;
-    unsigned seqnums_per_block = packets_per_block / 8;
+    unsigned packets_per_spectrum = p_ps_params->obsnchan/p_ps_params->chperpkt;
+    unsigned seqnums_per_block = packets_per_block / packets_per_spectrum;
     hashpipe_warn("hpguppi_mb1_net_thread", "block_size %lu", block_size);
-    hashpipe_warn("hpguppi_mb1_net_thread", "ntime_per_block%lu", ntime_per_block);
+    hashpipe_warn("hpguppi_mb1_net_thread", "ntime_per_block %lu", ntime_per_block);
     hashpipe_warn("hpguppi_mb1_net_thread", "packet_data_size %lu", packet_data_size);
     hashpipe_warn("hpguppi_mb1_net_thread", "packets_per_block %u", packets_per_block);
     hashpipe_warn("hpguppi_mb1_net_thread", "seqnums_per_block %u", seqnums_per_block);
@@ -513,7 +515,7 @@ static void *run(hashpipe_thread_args_t * args)
     struct datablock_stats blocks[nblock];
     for (i=0; i<nblock; i++)
         init_block(&blocks[i], db, packet_data_size, packets_per_block,
-                overlap_packets);
+                packets_per_spectrum, overlap_packets);
 
     /* Convenience names for first/last blocks in set */
     struct datablock_stats *fblock, *lblock;
