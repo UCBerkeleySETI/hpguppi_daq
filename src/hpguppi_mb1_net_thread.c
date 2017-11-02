@@ -338,8 +338,10 @@ static int init(hashpipe_thread_args_t *args)
     hgetr8(st.buf, "OBSBW", &obsbw);
     hgeti4(st.buf, "OVERLAP", &overlap);
     hgets(st.buf, "OBS_MODE", 80, obs_mode);
+
     // Calculate TBIN
-    tbin = p_psp->obsnchan / obsbw / 1e6;
+    tbin = p_psp->obsnchan / abs(obsbw) / 1e6;
+
     // Store bind host/port info etc in status buffer
     hputs(st.buf, "BINDHOST", p_psp->ifname);
     hputi4(st.buf, "BINDPORT", p_psp->port);
