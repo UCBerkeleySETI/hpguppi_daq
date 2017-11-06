@@ -327,7 +327,7 @@ void hpguppi_s6_packet_data_copy_from_payload(char *databuf, int block_chan,
     const uint64_t *iptr = (const uint64_t *)(payload + 8);
 #endif // DEBUG_S6_COPY
 
-    uint32_t *optr = (uint32_t *)(databuf
+    uint64_t *optr = (uint64_t *)(databuf
                    + block_time * obsnchan * bytes_per_sample
                    + block_chan * bytes_per_sample);
 
@@ -348,15 +348,20 @@ void hpguppi_s6_packet_data_copy_from_payload(char *databuf, int block_chan,
 #if 0
     memcpy(optr, iptr, payload_size - 16);
 #else
+    // Unpack the unusual X0 X1 Y0 Y1 order into the normal X0 Y0 X1 Y1 order.
+    // This code is specific to little endian systems.  To make it more general,
+    // should use be64toh and htobe64.
     for (ichan=0; ichan<chan_per_packet/2; ++ichan)
     {
+        // In mem: 00 11 22 33 44 55 66 77
+        // In reg: 77 66 55 44 33 22 11 00
         uint64_t d = *iptr++;
 
-        *optr++ = ((d>>32) & 0xffff0000)
-                | ((d>>16) & 0x0000ffff);
-
-        *optr++ = ((d>>16) & 0xffff0000)
-                | ((d    ) & 0x0000ffff);
+        // In reg: 77 66 33 22 55 44 11 00
+        // In mem: 00 11 44 55 22 33 66 77
+        *optr++ = ((d    ) & 0xffff00000000ffff)
+                | ((d<<16) & 0x0000ffff00000000)
+                | ((d>>16) & 0x00000000ffff0000);
     }
 #endif
 }
