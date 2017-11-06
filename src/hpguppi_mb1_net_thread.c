@@ -862,7 +862,7 @@ static void *run(hashpipe_thread_args_t * args)
 
             memcpy(curheader, status_buf, HASHPIPE_STATUS_TOTAL_SIZE);
             //if (baseband_packets) { memset(curdata, 0, block_size); }
-            if (1) { memset(curdata, 0x45, block_size); }
+            if (1) { memset(curdata, 0x00, block_size); }
         }
 
         /* Copy packet into any blocks where it belongs.
