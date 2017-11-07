@@ -246,16 +246,13 @@ static void write_baseband_packet_to_block_from_pktsock_frame(
     }
 
     int block_chan = hpguppi_pktsock_hdr_chan(p_frame) - obsschan;
-    if(block_chan > obsnchan) {
-        // Should "never" happen
+    if(block_chan < 0 || block_chan >= obsnchan) {
+        // Should "never" happen, but it can if the switch gets confused
         hashpipe_warn("hpguppi_mb1_net_thread",
                 "packet channel %d not in range [%d,%d)",
                 hpguppi_pktsock_hdr_chan(p_frame),
                 obsschan, obsschan+obsnchan);
-        block_chan %= obsnchan;
-    } else if(block_chan < 0) {
-        hashpipe_error("hpguppi_mb1_net_thread", "Block chan less than 0! pkt chan %lu obsschan %lu", hpguppi_pktsock_hdr_chan(p_frame), obsschan);
-        exit(1);
+        return;
     }
 
     int block_time = seq_num - d->packet_idx;
