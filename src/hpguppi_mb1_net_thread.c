@@ -340,7 +340,7 @@ static int init(hashpipe_thread_args_t *args)
     hgets(st.buf, "OBS_MODE", 80, obs_mode);
 
     // Calculate TBIN
-    tbin = p_psp->obsnchan / abs(obsbw) / 1e6;
+    tbin = p_psp->obsnchan / fabs(obsbw) / 1e6;
 
     // Store bind host/port info etc in status buffer
     hputs(st.buf, "BINDHOST", p_psp->ifname);
