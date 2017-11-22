@@ -127,8 +127,6 @@ void hpguppi_read_pktsock_params(char *buf, struct hpguppi_pktsock_params *p)
     get_int("BINDPORT", p->port, 60000);
     get_int("OBSSCHAN", p->obsschan, 0);
     get_int("OBSNCHAN", p->obsnchan, 64);
-    // If CHPERPKT is not given, assume we get them all in 8 packets
-    get_int("CHPERPKT", p->chperpkt, p->obsnchan/8);
     get_str("PKTFMT", p->packet_format, 32, "1SFA");
     if (strncmp(p->packet_format, "PARKES", 6)==0)
         p->packet_size = 2056;

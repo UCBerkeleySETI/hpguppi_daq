@@ -335,6 +335,9 @@ static int init(hashpipe_thread_args_t *args)
     hgetr8(st.buf, "OBSBW", &obsbw);
     hgeti4(st.buf, "OVERLAP", &overlap);
     hgets(st.buf, "OBS_MODE", 80, obs_mode);
+    // If CHPERPKT is not given, assume we get them all in 8 packets
+    p_psp->chperpkt =  p_psp->obsnchan/8;
+    hgeti4(st.buf, "CHPERPKT", &p_psp->chperpkt);
 
     // Calculate TBIN
     tbin = p_psp->obsnchan / fabs(obsbw) / 1e6;
