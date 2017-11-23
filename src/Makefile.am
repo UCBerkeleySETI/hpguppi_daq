@@ -23,6 +23,7 @@ libsla_support = slalib.h sla.c f77.h
 
 hpguppi_threads = hpguppi_net_thread.c     \
 		  hpguppi_mb1_net_thread.c \
+		  hpguppi_mb128ch_net_thread.c \
 		  hpguppi_rawdisk_thread.c
 
 # This is the paper_gpu plugin itself
