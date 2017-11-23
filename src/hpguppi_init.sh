@@ -10,17 +10,17 @@ cores_per_cpu=`grep cpu.cores /proc/cpuinfo | awk 'NR==1{print $NF}'`
 case $cores_per_cpu in
   6)
     # We use a dual hexa-core CPU system with everything on the second socket (CPUs 6-11),
-    # with CPU 6 being reserved for NIC IRQs.  This leads to the following CPU mask:
+    # with CPU 8 being reserved for NIC IRQs.  This leads to the following CPU mask:
     #
     # 1111 1100 0000 0000
     # 5432 1098 7654 3210
     # ---- ---- ---- ----
-    # 0000 1111 1000 0000 = 0x0f80
-    NET0CPU=7
-    OUT0CPU=8
-    NET1CPU=9
-    OUT1CPU=10
-    MASK=0x0f80
+    # 0000 1110 1100 0000 = 0x0ec0
+    NET0CPU=9
+    OUT0CPU=10
+    NET1CPU=6
+    OUT1CPU=7
+    MASK=0x0ec0
     ;;
   8)
     # We use a dual octa-core CPU system with everything on the second socket (CPUs 8-15),
