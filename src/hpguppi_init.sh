@@ -121,6 +121,12 @@ then
   net_thread=hpguppi_mb1_net_thread
   bindport=$((0x5336)) # ASCII 0x53 0x36 is "S6" (for SEREDIP6)
   shift
+elif [ "$1" = 'mb128ch' ]
+then
+  redis_sync_key=s6_mcount_0
+  net_thread=hpguppi_mb128ch_net_thread
+  bindport=$((0x4D42)) # ASCII 0x4D 0x42 is "MB" (for MultiBeam)
+  shift
 elif echo "$1" | grep -q 'thread'
 then
   out_thread="$1"
@@ -130,7 +136,7 @@ fi
 # Exit if no instance id is given
 if [ -z "$1" ]
 then
-  echo "Usage: $(basename $0) [mb1|fake|fakefake] INSTANCE_ID [...] [OPTIONS]"
+  echo "Usage: $(basename $0) [mb1|mb128ch|fake|fakefake] INSTANCE_ID [...] [OPTIONS]"
   exit 1
 fi
 
