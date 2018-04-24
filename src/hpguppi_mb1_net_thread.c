@@ -666,9 +666,9 @@ static void *run(hashpipe_thread_args_t * args)
             hashpipe_pktsock_stats(&p_ps_params->ps, &ps_pkts, &ps_drops);
             hashpipe_status_lock_safe(&st);
             hputi8(st.buf, "PKTIDX", seq_num);
-            hgeti8(st.buf, "PKTSTART", (long long int *)&start_seq_num);
+            hgetu8(st.buf, "PKTSTART", &start_seq_num);
             start_seq_num -= start_seq_num % seqnums_per_block;
-            hputi8(st.buf, "PKTSTART", start_seq_num);
+            hputu8(st.buf, "PKTSTART", start_seq_num);
             hgetr8(st.buf, "DWELL", &dwell_seconds);
             hputr8(st.buf, "DWELL", dwell_seconds); // In case it wasn't there
             hgetr8(st.buf, "TBIN", &tbin);

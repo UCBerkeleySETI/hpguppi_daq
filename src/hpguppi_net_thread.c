@@ -594,7 +594,7 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                 // Reset or increment packet index.  Setting PKTIDX to -1 in
                 // the status buffer (via external means) will simulate a
                 // re-arming of the packet generator (i.e. ROACH2).
-                hgetu8(st.buf, "PKTIDX", (unsigned long long*)&fake_pktidx_zero);
+                hgetu8(st.buf, "PKTIDX", &fake_pktidx_zero);
                 if(fake_pktidx_zero == -1) {
                     fake_pktidx = 0;
                 } else {
@@ -701,9 +701,9 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
         if(seq_num % packets_per_block == 0) {
             hashpipe_status_lock_safe(&st);
             hputi8(st.buf, "PKTIDX", seq_num);
-            hgeti8(st.buf, "PKTSTART", (long long int *)&start_seq_num);
+            hgetu8(st.buf, "PKTSTART", &start_seq_num);
             start_seq_num -= start_seq_num % packets_per_block;
-            hputi8(st.buf, "PKTSTART", start_seq_num);
+            hputu8(st.buf, "PKTSTART", start_seq_num);
             hgetr8(st.buf, "DWELL", &dwell_seconds);
             // Dwell blocks is equal to:
             //
