@@ -70,7 +70,7 @@ static void *run(hashpipe_thread_args_t * args)
     pthread_cleanup_push((void *)safe_close, &fdraw);
 
     /* Loop */
-    long long int packetidx=0, pktstart=0, pktstop=0;
+    int64_t packetidx=0, pktstart=0, pktstop=0;
     int npacket=0, ndrop=0, packetsize=0, blocksize=0, len=0;
     int curblock=0;
     int block_count=0, blocks_per_file=128, filenum=0;
