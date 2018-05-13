@@ -14,6 +14,9 @@
 #include <fcntl.h>
 
 #include "hashpipe.h"
+#include "rawspec.h"
+#include "rawspec_fbutils.h"
+#include "rawspec_rawutils.h"
 
 #include "hpguppi_databuf.h"
 #include "hpguppi_params.h"
@@ -24,6 +27,31 @@ static const char BACKEND_RECORD[] =
 // 0123456789012345678901234567890123456789
   "BACKEND = 'GUPPI   '                    " \
   "                                        ";
+
+#ifndef DEBUG_RAWSPEC_CALLBACKS
+#define DEBUG_RAWSPEC_CALLBACKS (0)
+#endif
+
+typedef struct {
+  int fd; // Output file descriptor or socket
+  // TODO? unsigned int total_spectra;
+  // TODO? unsigned int total_packets;
+  // TODO? unsigned int total_bytes;
+  // TODO? uint64_t total_ns;
+  // TODO? double rate;
+  // TODO? int debug_callback;
+  // TODO? // No way to tell if output_thread is valid expect via separate flag
+  // TODO? int output_thread_valid;
+  // TODO? pthread_t output_thread;
+  // Copies of values in rawspec_context
+  // (useful for output threads)
+  float * h_pwrbuf;
+  size_t h_pwrbuf_size;
+  // TODO? unsigned int Nds;
+  // TODO? unsigned int Nf; // Number of fine channels (== Nc*Nts[i])
+  // Filterbank header
+  fb_hdr_t fb_hdr;
+} rawspec_callback_data_t;
 
 ssize_t write_all(int fd, const void *buf, size_t bytes_to_write)
 {
@@ -48,6 +76,173 @@ int safe_close(int *pfd) {
     return close(*pfd);
 }
 
+void rawspec_dump_callback(
+    rawspec_context * ctx,
+    int output_product,
+    int callback_type)
+{
+  rawspec_callback_data_t * cb_data =
+    &((rawspec_callback_data_t *)ctx->user_data)[output_product];
+
+  if(callback_type == RAWSPEC_CALLBACK_POST_DUMP) {
+    write_all(cb_data->fd, cb_data->h_pwrbuf, cb_data->h_pwrbuf_size);
+  }
+}
+
+void rawspec_stop(rawspec_context * ctx)
+{
+  int i;
+  rawspec_callback_data_t * cb_data =
+    (rawspec_callback_data_t *)ctx->user_data;
+
+  // Wait for GPU work to complete
+  rawspec_wait_for_completion(ctx);
+
+  // Close rawspec output files
+  for(i=0; i<ctx->No; i++) {
+    if(cb_data[i].fd != -1) {
+      close(cb_data[i].fd);
+      cb_data[i].fd = -1;
+    }
+  }
+}
+
+void update_fb_hdrs_from_raw_hdr(rawspec_context *ctx, const char *p_rawhdr)
+{
+  int i;
+  rawspec_raw_hdr_t raw_hdr;
+  rawspec_callback_data_t * cb_data = ctx->user_data;
+
+  rawspec_raw_parse_header(p_rawhdr, &raw_hdr);
+
+  // Update filterbank headers based on raw params and Nts etc.
+  for(i=0; i<ctx->No; i++) {
+    // Same for all products
+    cb_data[i].fb_hdr.src_raj = raw_hdr.ra;
+    cb_data[i].fb_hdr.src_dej = raw_hdr.dec;
+    cb_data[i].fb_hdr.tstart = raw_hdr.mjd;
+    cb_data[i].fb_hdr.ibeam = raw_hdr.beam_id;
+    strncpy(cb_data[i].fb_hdr.source_name, raw_hdr.src_name, 80);
+    cb_data[i].fb_hdr.source_name[80] = '\0';
+    // Output product dependent
+    cb_data[i].fb_hdr.foff = raw_hdr.obsbw/raw_hdr.obsnchan/ctx->Nts[i];
+    // This computes correct fch1 for odd or even number of fine channels
+    cb_data[i].fb_hdr.fch1 = raw_hdr.obsfreq
+      - raw_hdr.obsbw*(raw_hdr.obsnchan-1)/(2*raw_hdr.obsnchan)
+      - (ctx->Nts[i]/2) * cb_data[i].fb_hdr.foff
+      ;//TODO + schan * raw_hdr.obsbw / raw_hdr.obsnchan; // Adjust for schan
+    cb_data[i].fb_hdr.nchans = ctx->Nc * ctx->Nts[i];
+    cb_data[i].fb_hdr.tsamp = raw_hdr.tbin * ctx->Nts[i] * ctx->Nas[i];
+    // TODO az_start, za_start
+  }
+}
+
+static int init(hashpipe_thread_args_t * args)
+{
+    int i;
+    uint32_t Nc = 0;
+    rawspec_context * ctx;
+    rawspec_callback_data_t * cb_data;
+
+    hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->ibuf;
+    hashpipe_status_t st = args->st;
+
+    hashpipe_status_lock_safe(&st);
+    // Get Nc from OBSNCHAN
+    hgetu4(st.buf, "OBSNCHAN", &Nc);
+    hashpipe_status_unlock_safe(&st);
+
+    if(Nc == 0) {
+      hashpipe_error("hpguppi_rawdisk_thread",
+	  "OBSNCHAN not found in status buffer");
+      return HASHPIPE_ERR_PARAM;
+    }
+
+    ctx = calloc(1, sizeof(rawspec_context));
+    if(!ctx) {
+      hashpipe_error("hpguppi_rawdisk_thread",
+	  "unable to allocate rawspec context");
+      return HASHPIPE_ERR_SYS;
+    }
+
+    // These values are defaults for typical BL filterbank products.
+    // TODO Get from status buffer
+    ctx->No = 3;
+    ctx->Np = 2; // TODO Get from status buffer
+    ctx->Nc = Nc;
+    ctx->Ntpb = calc_ntime_per_block(BLOCK_DATA_SIZE, Nc);
+    ctx->Npolout = 4; // TODO Get from status buffer
+
+    // Number of fine channels per coarse channel (i.e. FFT size).
+    ctx->Nts[0] = (1<<20);
+    ctx->Nts[1] = (1<<3);
+    ctx->Nts[2] = (1<<10);
+    // Number of fine spectra to accumulate per dump.
+    ctx->Nas[0] = 51;
+    ctx->Nas[1] = 128;
+    ctx->Nas[2] = 3072;
+
+    ctx->dump_callback = rawspec_dump_callback;
+
+    // Init user_data to be array of callback data structures
+    cb_data = calloc(ctx->No, sizeof(rawspec_callback_data_t));
+    if(!cb_data) {
+      hashpipe_error("hpguppi_rawdisk_thread",
+	  "unable to allocate rawspec callback data");
+      return HASHPIPE_ERR_SYS;
+    }
+
+    // Init pre-defined filterbank headers
+    for(i=0; i<ctx->No; i++) {
+      cb_data[i].fb_hdr.machine_id = 20;
+      cb_data[i].fb_hdr.telescope_id = 6; // GBT // TODO Make more generic
+      cb_data[i].fb_hdr.data_type = 1;
+      cb_data[i].fb_hdr.nbeams =  1;
+      cb_data[i].fb_hdr.ibeam  =  1; // TODO Use actual beam ID for Parkes
+      cb_data[i].fb_hdr.nbits  = 32;
+      cb_data[i].fb_hdr.nifs   = ctx->Npolout;
+
+      // Init callback file descriptors to sentinal values
+      cb_data[i].fd = -1;
+    }
+    ctx->user_data = cb_data;
+
+    // Let rawspec manage device block buffers
+    ctx->Nb = 0;
+    // Use databuf blocks as "caller-managed" rawspec host block buffers
+    ctx->Nb_host = args->ibuf->n_block;
+    ctx->h_blkbufs = malloc(ctx->Nb_host * sizeof(void *));
+    if(!ctx->h_blkbufs) {
+      hashpipe_error("hpguppi_rawdisk_thread",
+	  "unable to allocate rawspec h_blkbuf array");
+      return HASHPIPE_ERR_SYS;
+    }
+    for(i=0; i < ctx->Nb_host; i++) {
+      ctx->h_blkbufs[i] = (char *)&db->block[i].data;
+    }
+
+    // Initialize rawspec
+    if(rawspec_initialize(ctx)) {
+      hashpipe_error("hpguppi_rawdisk_thread",
+	  "rawspec initialization failed");
+      return HASHPIPE_ERR_SYS;
+    } else {
+      // Copy fields from ctx to cb_data
+      for(i=0; i<ctx->No; i++) {
+	cb_data[i].h_pwrbuf = ctx->h_pwrbuf[i];
+	cb_data[i].h_pwrbuf_size = ctx->h_pwrbuf_size[i];
+	//TODO? cb_data[i].Nds = ctx->Nds[i];
+	//TODO? cb_data[i].Nf  = ctx->Nts[i] * ctx->Nc;
+	//TODO? cb_data[i].debug_callback = DEBUG_RAWSPEC_CALLBACKS;
+      }
+    }
+
+    // Save context
+    args->user_data = ctx;
+
+    return HASHPIPE_OK;
+}
+
 static void *run(hashpipe_thread_args_t * args)
 {
     // Local aliases to shorten access to args fields
@@ -55,6 +250,10 @@ static void *run(hashpipe_thread_args_t * args)
     hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->ibuf;
     hashpipe_status_t st = args->st;
     const char * status_key = args->thread_desc->skey;
+
+    rawspec_context * ctx = (rawspec_context *)args->user_data;
+    rawspec_callback_data_t * cb_data = (rawspec_callback_data_t *)ctx->user_data;
+    uint32_t rawspec_block_idx = 0;
 
     /* Read in general parameters */
     struct hpguppi_params gp;
@@ -79,6 +278,7 @@ static void *run(hashpipe_thread_args_t * args)
     int open_flags = 0;
     int directio = 0;
     int rv = 0;
+    int i;
 
     while (run_threads()) {
 
@@ -119,6 +319,10 @@ static void *run(hashpipe_thread_args_t * args)
 		got_packet_0 = 0;
 		filenum = 0;
 		block_count=0;
+
+		// Stop rawspec here
+		rawspec_stop(ctx);
+		rawspec_block_idx = 0;
 	    }
 	    /* Mark as free */
 	    hpguppi_input_databuf_set_free(db, curblock);
@@ -175,6 +379,39 @@ static void *run(hashpipe_thread_args_t * args)
                 hashpipe_error("hpguppi_rawdisk_thread", "Error opening file.");
                 pthread_exit(NULL);
             }
+
+	    // Start new rawspec here, but first ensure that rawspec is stopped
+	    rawspec_stop(ctx); // no-op if already stopped
+	    rawspec_block_idx = 0;
+
+	    // Update filterbank headers based on raw params and Nts etc.
+	    update_fb_hdrs_from_raw_hdr(ctx, ptr);
+
+	    // Open filterbank files
+	    for(i=0; i<ctx->No; i++) {
+	      sprintf(fname, "%s.%04d.fil", pf.basefilename, i);
+	      fprintf(stderr, "Opening fil file '%s'\n", fname);
+	      last_slash = strrchr(fname, '/');
+	      if(last_slash) {
+		strncpy(cb_data[i].fb_hdr.rawdatafile, last_slash+1, 80);
+	      } else {
+		strncpy(cb_data[i].fb_hdr.rawdatafile, fname, 80);
+	      }
+	      cb_data[i].fb_hdr.rawdatafile[80] = '\0';
+
+	      cb_data[i].fd = open(fname, O_CREAT|O_WRONLY|O_TRUNC, 0644);
+	      if(cb_data[i].fd == -1) {
+		// If we can't open this output file, we probably won't be able to
+		// open any more output files, so print message and bail out.
+		hashpipe_error("hpguppi_rawdisk_thread",
+		    "cannot open filterbank output file, giving up");
+                pthread_exit(NULL);
+	      }
+	      posix_fadvise(cb_data[i].fd, 0, 0, POSIX_FADV_DONTNEED);
+
+	      // Write filterbank header to output file
+	      fb_fd_write_header(cb_data[i].fd, &cb_data[i].fb_hdr);
+	    }
         }
         
         /* See if we need to open next file */
@@ -258,11 +495,34 @@ static void *run(hashpipe_thread_args_t * args)
                         //"Error writing data.");
             }
 
+	    if(!directio) {
+	      /* flush output */
+	      fsync(fdraw);
+	    }
+
             /* Increment counter */
             block_count++;
 
-            /* flush output */
-            fsync(fdraw);
+	    // If first block of a GPU input buffer
+	    if(rawspec_block_idx % ctx->Nb == 0) {
+	      // Wait for work to complete (should return immediately if we're
+	      // keeping up)
+	      rawspec_wait_for_completion(ctx);
+	    }
+
+	    // TODO Feed any missing blocks first
+	    // TODO Add function to rawspec to use zeros for missing blocks.
+	    // TODO Add function to rawspec to optimize case of missing an
+	    // entire input buffer.
+
+	    // Feed block to rawspec here
+	    rawspec_copy_blocks_to_gpu(ctx, curblock, rawspec_block_idx, 1);
+	    // Increment GPU block index
+	    rawspec_block_idx++;
+	    // If a multiple of Nb blocks have been sent, start processing
+	    if(rawspec_block_idx % ctx->Nb == 0) {
+	      rawspec_start_processing(ctx, RAWSPEC_FORWARD_FFT);
+	    }
         }
 
         /* Mark as free */
@@ -278,6 +538,7 @@ static void *run(hashpipe_thread_args_t * args)
 
     pthread_exit(NULL);
 
+    // TODO Need a rawspec cleanup call
     pthread_cleanup_pop(0); /* Closes safe_close */
     pthread_cleanup_pop(0); /* Closes hpguppi_free_psrfits */
 
@@ -286,7 +547,7 @@ static void *run(hashpipe_thread_args_t * args)
 static hashpipe_thread_desc_t rawdisk_thread = {
     name: "hpguppi_rawdisk_thread",
     skey: "DISKSTAT",
-    init: NULL,
+    init: init,
     run:  run,
     ibuf_desc: {hpguppi_input_databuf_create},
     obuf_desc: {NULL}
@@ -297,4 +558,4 @@ static __attribute__((constructor)) void ctor()
   register_hashpipe_thread(&rawdisk_thread);
 }
 
-// vi: set ts=8 sw=4 noet :
+// vi: set ts=8 sw=2 noet :

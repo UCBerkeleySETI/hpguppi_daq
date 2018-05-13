@@ -23,6 +23,9 @@ AC_PROG_CC
 # Check for HASHPIPE
 AX_CHECK_HASHPIPE
 
+# Check for rawspec
+AX_CHECK_RAWSPEC
+
 # Checks for libraries.
 #AC_CHECK_LIB([pthread], [pthread_create])
 AC_CHECK_LIB([m], [cos])
