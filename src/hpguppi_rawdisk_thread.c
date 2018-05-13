@@ -40,9 +40,9 @@ typedef struct {
   // TODO? uint64_t total_ns;
   // TODO? double rate;
   // TODO? int debug_callback;
-  // TODO? // No way to tell if output_thread is valid expect via separate flag
-  // TODO? int output_thread_valid;
-  // TODO? pthread_t output_thread;
+  // No way to tell if output_thread is valid expect via separate flag
+  int output_thread_valid;
+  pthread_t output_thread;
   // Copies of values in rawspec_context
   // (useful for output threads)
   float * h_pwrbuf;
@@ -76,16 +76,40 @@ int safe_close(int *pfd) {
     return close(*pfd);
 }
 
+void * rawspec_dump_file_thread_func(void *arg)
+{
+  rawspec_callback_data_t * cb_data = (rawspec_callback_data_t *)arg;
+
+  write_all(cb_data->fd, cb_data->h_pwrbuf, cb_data->h_pwrbuf_size);
+
+  return NULL;
+}
+
 void rawspec_dump_callback(
     rawspec_context * ctx,
     int output_product,
     int callback_type)
 {
+  int rc;
   rawspec_callback_data_t * cb_data =
     &((rawspec_callback_data_t *)ctx->user_data)[output_product];
 
-  if(callback_type == RAWSPEC_CALLBACK_POST_DUMP) {
-    write_all(cb_data->fd, cb_data->h_pwrbuf, cb_data->h_pwrbuf_size);
+  if(callback_type == RAWSPEC_CALLBACK_PRE_DUMP) {
+    if(cb_data->output_thread_valid) {
+      // Join output thread
+      if((rc=pthread_join(cb_data->output_thread, NULL))) {
+        fprintf(stderr, "pthread_join: %s\n", strerror(rc));
+      }
+      // Flag thread as invalid
+      cb_data->output_thread_valid = 0;
+    }
+  } else if(callback_type == RAWSPEC_CALLBACK_POST_DUMP) {
+    if((rc=pthread_create(&cb_data->output_thread, NULL,
+                      rawspec_dump_file_thread_func, cb_data))) {
+      fprintf(stderr, "pthread_create: %s\n", strerror(rc));
+    } else {
+      cb_data->output_thread_valid = 1;
+    }
   }
 }
 
