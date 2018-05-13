@@ -438,16 +438,15 @@ static void *run(hashpipe_thread_args_t * args)
      * channels during an obs is not supported.
      */
     int block_size = BLOCK_DATA_SIZE;
-    int ntime_per_block = BLOCK_DATA_SIZE / (4 * p_ps_params->obsnchan);
+    int ntime_per_block = calc_ntime_per_block(block_size,
+                                               p_ps_params->obsnchan);
 
-    // Set ntime_per_block to closest power of 2 less than or equal to
-    // ntime_per_block.
-    unsigned i = 0;
-    while(ntime_per_block != 1) {
-        ntime_per_block >>= 1;
-        i++;
+    // ntime_per_block must be greater than or equal to 512
+    if(ntime_per_block < 512) {
+        hashpipe_error("hpguppi_mb128ch_net_thread",
+                "ntime_per_block (%d) must be >= 512", ntime_per_block);
+        pthread_exit(NULL);
     }
-    ntime_per_block <<= i;
 
     block_size = 4 * p_ps_params->obsnchan * ntime_per_block;
 
@@ -455,13 +454,6 @@ static void *run(hashpipe_thread_args_t * args)
         hashpipe_error("hpguppi_mb128ch_net_thread", "BLOCSIZE > databuf block_size");
         block_size = BLOCK_DATA_SIZE;
         ntime_per_block = BLOCK_DATA_SIZE / (4 * p_ps_params->obsnchan);
-    }
-
-    // ntime_per_block must be greater than or equal to 512
-    if(ntime_per_block < 512) {
-        hashpipe_error("hpguppi_mb128ch_net_thread",
-                "ntime_per_block (%d) must be >= 512", ntime_per_block);
-        pthread_exit(NULL);
     }
 
     // Update BLOCSIZE in status buffer
@@ -507,6 +499,7 @@ static void *run(hashpipe_thread_args_t * args)
     }
 
     /* List of databuf blocks currently in use */
+    unsigned int i;
     const int nblock = 2;
     struct datablock_stats blocks[nblock];
     for (i=0; i<nblock; i++)

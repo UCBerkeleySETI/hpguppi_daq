@@ -71,4 +71,8 @@ void hpguppi_read_pktsock_params(char *buf, struct hpguppi_pktsock_params *p);
 // use Direct I/O.  Undefined or zero or non-numeric means do NOT use Direct
 // I/O.
 int hpguppi_read_directio_mode(char *buf);
+
+// Calculate the largest power of two number of time samples that fit in
+// max_block_size block size for a given number of channels.
+int calc_ntime_per_block(int max_block_size, int obsnchan);
 #endif

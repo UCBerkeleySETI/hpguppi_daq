@@ -450,3 +450,21 @@ int hpguppi_read_directio_mode(char *buf)
     get_int("DIRECTIO", directio, 0);
     return directio;
 }
+
+// Calculate the largest power of two number of time samples that fit in
+// max_block_size block size for a given number of channels.
+int calc_ntime_per_block(int max_block_size, int obsnchan)
+{
+    int ntime_per_block = max_block_size / (4 * obsnchan);
+
+    // Set ntime_per_block to closest power of 2 less than or equal to
+    // ntime_per_block.
+    unsigned int i = 0;
+    while(ntime_per_block != 1) {
+        ntime_per_block >>= 1;
+        i++;
+    }
+    ntime_per_block <<= i;
+
+    return ntime_per_block;
+}
