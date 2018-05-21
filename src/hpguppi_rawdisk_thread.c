@@ -142,6 +142,7 @@ void update_fb_hdrs_from_raw_hdr(rawspec_context *ctx, const char *p_rawhdr)
   // Update filterbank headers based on raw params and Nts etc.
   for(i=0; i<ctx->No; i++) {
     // Same for all products
+    cb_data[i].fb_hdr.telescope_id = fb_telescope_id(raw_hdr.telescop);
     cb_data[i].fb_hdr.src_raj = raw_hdr.ra;
     cb_data[i].fb_hdr.src_dej = raw_hdr.dec;
     cb_data[i].fb_hdr.tstart = raw_hdr.mjd;
@@ -221,7 +222,7 @@ static int init(hashpipe_thread_args_t * args)
     // Init pre-defined filterbank headers
     for(i=0; i<ctx->No; i++) {
       cb_data[i].fb_hdr.machine_id = 20;
-      cb_data[i].fb_hdr.telescope_id = 6; // GBT // TODO Make more generic
+      cb_data[i].fb_hdr.telescope_id = -1; // Unknown (updated later)
       cb_data[i].fb_hdr.data_type = 1;
       cb_data[i].fb_hdr.nbeams =  1;
       cb_data[i].fb_hdr.ibeam  =  1; // TODO Use actual beam ID for Parkes
