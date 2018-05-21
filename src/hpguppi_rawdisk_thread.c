@@ -195,7 +195,9 @@ static int init(hashpipe_thread_args_t * args)
     ctx->Np = 2; // TODO Get from status buffer
     ctx->Nc = Nc;
     ctx->Ntpb = calc_ntime_per_block(BLOCK_DATA_SIZE, Nc);
-    ctx->Npolout = 4; // TODO Get from status buffer
+    ctx->Npolout[0] = 1; // TODO Get from status buffer?
+    ctx->Npolout[1] = 1; // TODO Get from status buffer?
+    ctx->Npolout[2] = 4; // TODO Get from status buffer?
 
     // Number of fine channels per coarse channel (i.e. FFT size).
     ctx->Nts[0] = (1<<20);
@@ -224,7 +226,7 @@ static int init(hashpipe_thread_args_t * args)
       cb_data[i].fb_hdr.nbeams =  1;
       cb_data[i].fb_hdr.ibeam  =  1; // TODO Use actual beam ID for Parkes
       cb_data[i].fb_hdr.nbits  = 32;
-      cb_data[i].fb_hdr.nifs   = ctx->Npolout;
+      cb_data[i].fb_hdr.nifs   = ctx->Npolout[i];
 
       // Init callback file descriptors to sentinal values
       cb_data[i].fd = -1;
