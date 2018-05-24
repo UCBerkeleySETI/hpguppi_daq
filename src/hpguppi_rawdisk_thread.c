@@ -197,7 +197,7 @@ static int init(hashpipe_thread_args_t * args)
     ctx->Nc = Nc;
     ctx->Ntpb = calc_ntime_per_block(BLOCK_DATA_SIZE, Nc);
     ctx->Npolout[0] = 1; // TODO Get from status buffer?
-    ctx->Npolout[1] = 1; // TODO Get from status buffer?
+    ctx->Npolout[1] = 4; // TODO Get from status buffer?
     ctx->Npolout[2] = 4; // TODO Get from status buffer?
 
     // Number of fine channels per coarse channel (i.e. FFT size).
