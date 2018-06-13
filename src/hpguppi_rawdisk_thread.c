@@ -13,6 +13,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include "ioprio.h"
+
 #include "hashpipe.h"
 #include "rawspec.h"
 #include "rawspec_fbutils.h"
@@ -79,6 +81,11 @@ int safe_close(int *pfd) {
 void * rawspec_dump_file_thread_func(void *arg)
 {
   rawspec_callback_data_t * cb_data = (rawspec_callback_data_t *)arg;
+
+  /* Set I/O priority class for this thread to "best effort" */
+  if(ioprio_set(IOPRIO_WHO_PROCESS, 0, IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, 7))) {
+    hashpipe_error("hpguppi_rawdisk_thread", "ioprio_set IOPRIO_CLASS_BE");
+  }
 
   write_all(cb_data->fd, cb_data->h_pwrbuf, cb_data->h_pwrbuf_size);
 
@@ -295,6 +302,11 @@ static void *run(hashpipe_thread_args_t * args)
     static int fdraw = -1;
     pthread_cleanup_push((void *)safe_close, &fdraw);
 
+    /* Set I/O priority class for this thread to "real time" */
+    if(ioprio_set(IOPRIO_WHO_PROCESS, 0, IOPRIO_PRIO_VALUE(IOPRIO_CLASS_RT, 7))) {
+      hashpipe_error("hpguppi_rawdisk_thread", "ioprio_set IOPRIO_CLASS_RT");
+    }
+
     /* Loop */
     int64_t packetidx=0, pktstart=0, pktstop=0;
     int npacket=0, ndrop=0, packetsize=0, blocksize=0, len=0;
@@ -426,7 +438,7 @@ static void *run(hashpipe_thread_args_t * args)
 	      }
 	      cb_data[i].fb_hdr.rawdatafile[80] = '\0';
 
-	      cb_data[i].fd = open(fname, O_CREAT|O_WRONLY|O_TRUNC, 0644);
+	      cb_data[i].fd = open(fname, O_CREAT|O_WRONLY|O_TRUNC|O_SYNC, 0644);
 	      if(cb_data[i].fd == -1) {
 		// If we can't open this output file, we probably won't be able to
 		// open any more output files, so print message and bail out.
