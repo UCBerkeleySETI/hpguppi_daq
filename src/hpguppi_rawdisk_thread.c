@@ -145,6 +145,8 @@ void update_fb_hdrs_from_raw_hdr(rawspec_context *ctx, const char *p_rawhdr)
   rawspec_callback_data_t * cb_data = ctx->user_data;
 
   rawspec_raw_parse_header(p_rawhdr, &raw_hdr);
+  hashpipe_info(__FUNCTION__,
+      "beam_id = %d/%d", raw_hdr.beam_id, raw_hdr.nbeam);
 
   // Update filterbank headers based on raw params and Nts etc.
   for(i=0; i<ctx->No; i++) {
@@ -154,6 +156,7 @@ void update_fb_hdrs_from_raw_hdr(rawspec_context *ctx, const char *p_rawhdr)
     cb_data[i].fb_hdr.src_dej = raw_hdr.dec;
     cb_data[i].fb_hdr.tstart = raw_hdr.mjd;
     cb_data[i].fb_hdr.ibeam = raw_hdr.beam_id;
+    cb_data[i].fb_hdr.nbeams = raw_hdr.nbeam;
     strncpy(cb_data[i].fb_hdr.source_name, raw_hdr.src_name, 80);
     cb_data[i].fb_hdr.source_name[80] = '\0';
     // Output product dependent
@@ -362,6 +365,11 @@ static void *run(hashpipe_thread_args_t * args)
 		// Stop rawspec here
 		rawspec_stop(ctx);
 		rawspec_block_idx = 0;
+
+		// Print end of recording conditions
+		hashpipe_info("hashpipe_raw_disk_thread",
+		    "recording stopped: pktstart %lu pktstop %lu pktidx %lu",
+		    pktstart, pktstop, packetidx);
 	    }
 	    /* Mark as free */
 	    hpguppi_input_databuf_set_free(db, curblock);
