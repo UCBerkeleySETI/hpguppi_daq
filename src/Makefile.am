@@ -12,10 +12,12 @@ hpguppi_databuf = hpguppi_databuf.h \
 
 hpguppi_support = hpguppi_params.h \
 		  hpguppi_params.c \
+		  hpguppi_pksuwl.h \
 		  hpguppi_time.h   \
 		  hpguppi_time.c   \
 		  hpguppi_udp.h    \
 		  hpguppi_udp.c    \
+		  hpguppi_vdif.h   \
 		  polyco_struct.h  \
 		  psrfits.h
 
@@ -24,12 +26,13 @@ libsla_support = slalib.h sla.c f77.h
 hpguppi_threads = hpguppi_net_thread.c     \
 		  hpguppi_mb1_net_thread.c \
 		  hpguppi_mb128ch_net_thread.c \
+		  hpguppi_pksuwl_net_thread.c  \
 		  hpguppi_rawdisk_thread.c
 
 # This is the paper_gpu plugin itself
 lib_LTLIBRARIES = hpguppi_daq.la
 hpguppi_daq_la_SOURCES  = $(hpguppi_databuf) $(hpguppi_support) $(libsla_support) $(hpguppi_threads)
-hpguppi_daq_la_LIBADD   = -lsla -lrt -lrawspec
+hpguppi_daq_la_LIBADD   = -lsla -lrt -lrawspec -lhashpipe_ibverbs
 hpguppi_daq_la_LDFLAGS  = -avoid-version -module -shared -export-dynamic
 hpguppi_daq_la_LDFLAGS += -L"@LIBSLADIR@" -Wl,-rpath,"@LIBSLADIR@"
 hpguppi_daq_la_LDFLAGS += -L"@HASHPIPE_LIBDIR@" -Wl,-rpath,"@HASHPIPE_LIBDIR@"
