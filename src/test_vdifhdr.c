@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 #include "hpguppi_vdif.h"
+#include "hpguppi_pksuwl.h"
 
 int main(int argc, char *argv[])
 {
@@ -86,6 +87,8 @@ int main(int argc, char *argv[])
   printf("  timespec:\n");
   printf("    sec: %ld\n", ts.tv_sec);
   printf("    nsec: %ld\n", ts.tv_nsec);
+
+  printf("  pksuwl_pktidx: %lu\n", pksuwl_get_pktidx(pvdifhdr));
 
   return 0;
 }
