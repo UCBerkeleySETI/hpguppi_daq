@@ -27,3 +27,5 @@ libtool
 ltmain.sh
 missing
 stamp-h1
+# Other build products
+test_vdifhdr

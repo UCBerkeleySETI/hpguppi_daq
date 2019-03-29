@@ -40,4 +40,8 @@ dist_bin_SCRIPTS = hpguppi_gbtstatus_loop.rb \
 		   kill_hpguppi.sh           \
 		   start_hpguppi.sh
 
+check_PROGRAMS = test_vdifhdr
+
+test_vdifhdr_SOURCES = test_vdifhdr.c hpguppi_vdif.h
+
 # vi: set ts=8 noet :
