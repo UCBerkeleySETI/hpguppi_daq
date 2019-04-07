@@ -115,10 +115,15 @@ enum run_states {IDLE, LISTEN, RECORD};
 
 // Structure related to block management
 struct block_info {
+  // Set at start of run
   struct hpguppi_input_databuf *db; // Pointer to overall shared mem databuf
+  // Set at start of block
   int block_idx;                    // Block index number in databuf
   uint64_t block_num;               // Absolute block number
-  int npacket;                      // Number of packets filled so far
+  // Incremented throughout duration of block
+  uint32_t npacket;                 // Number of packets recevied so far
+  // Fields set during block finalization
+  uint32_t ndrop;                   // Count of expected packets not recevied
 };
 
 // Returns pointer to block_info's data
@@ -137,6 +142,7 @@ static char * block_info_header(const struct block_info *bi)
 static void reset_block_info_stats(struct block_info *bi)
 {
   bi->npacket=0;
+  bi->ndrop=0;
 }
 
 // (Re-)initialize some or all fields of block_info bi.
@@ -157,21 +163,19 @@ static void init_block_info(struct block_info *bi,
 }
 
 // Update block's header info and set filled status (i.e. hand-off to downstream)
-static void finalize_block(const struct block_info *bi)
+static void finalize_block(struct block_info *bi)
 {
   if(bi->block_idx < 0) {
     hashpipe_error(__FUNCTION__, "block_info.block_idx == %d", bi->block_idx);
     pthread_exit(NULL);
   }
-  //npacket_total += bi->npacket;
-  //ndropped_total += bi->packets_per_block - bi->npacket;
   char *header = block_info_header(bi);
   char dropstat[128];
-  int ndrop = (2 /*pols*/ * PKTIDX_PER_BLOCK) - bi->npacket;
-  sprintf(dropstat, "%d/%d", ndrop, (2 /*pols*/ * PKTIDX_PER_BLOCK));
+  bi->ndrop = (2 /*pols*/ * PKTIDX_PER_BLOCK) - bi->npacket;
+  sprintf(dropstat, "%d/%d", bi->ndrop, (2 /*pols*/ * PKTIDX_PER_BLOCK));
   hputi8(header, "PKTIDX", bi->block_num * PKTIDX_PER_BLOCK);
   hputi4(header, "NPKT", bi->npacket);
-  hputi4(header, "NDROP", ndrop);
+  hputi4(header, "NDROP", bi->ndrop);
   hputs(header, "DROPSTAT", dropstat);
   hpguppi_input_databuf_set_filled(bi->db, bi->block_idx);
 }
@@ -200,7 +204,12 @@ static void increment_block(struct block_info *bi, uint64_t block_num)
 
 // Wait for a block_info's databuf block to be free, then copy status buffer to
 // block's header and clear block's data.  Calling thread will exit on error
-// (should "never" happen).
+// (should "never" happen).  Status buffer updates made after the copy to the
+// block's header will not be seen in the block's header (e.g. by downstream
+// threads).  Any status buffer fields that need to be updated for correct
+// downstream processing of this block must be updated BEFORE calling this
+// function.  Note that some of the block's header fields will be set when the
+// block is finalized (see finalize_block() for details).
 static void wait_for_block_free(const struct block_info * bi,
     hashpipe_status_t * st, const char * status_key)
 {
@@ -265,7 +274,7 @@ static void wait_for_block_free(const struct block_info * bi,
 // data buffer.  Specifically, the polarizations must be interleaved and the
 // data values must be converted to two's complex form.
 //
-// This function treats the 16+16 bit complex samples as a signle unsigned 32
+// This function treats the 16+16 bit complex samples as a single unsigned 32
 // bit integer (uint32_t).
 static void copy_packet_data_to_databuf(uint64_t packet_idx,
     struct block_info *bi, struct vdifhdr * vdifhdr)
@@ -289,9 +298,6 @@ static void copy_packet_data_to_databuf(uint64_t packet_idx,
     *dst++ = *src++ ^ 0x80008000;
     dst++; // Extra increment to interleave pols
   }
-
-  // Count packet
-  bi->npacket++;
 }
 
 // Hashpipe threads typically perform some setup tasks in their init()
@@ -499,6 +505,7 @@ static void * run(hashpipe_thread_args_t * args)
   uint64_t packet_count = 0; // Counts packets between updates to status buffer
   uint64_t u64tmp = 0; // Used for status buffer interactions
   uint64_t max_recvpkt_count = 0;
+  uint64_t ndrop_total = 0;
 
   // Variables for handing received packets
   struct hashpipe_ibv_recv_pkt * hibv_rpkt = NULL;
@@ -768,6 +775,9 @@ static void * run(hashpipe_thread_args_t * args)
           stop_seq_num = start_seq_num + PKTIDX_PER_BLOCK * dwell_blocks;
           hputi8(st.buf, "PKTSTOP", stop_seq_num);
 
+          hgetu8(st.buf, "NDROP", &u64tmp);
+          u64tmp += ndrop_total; ndrop_total = 0;
+          hputu8(st.buf, "NDROP", u64tmp);
 // TODO
 #if 0
           // Calculate processing speed in Gbps (8*bytes/ns)
@@ -785,6 +795,12 @@ static void * run(hashpipe_thread_args_t * args)
       if(pkt_blk_num == wblk[1].block_num + 1) {
         // Finalize first working block
         finalize_block(wblk);
+        // Update ndrop counter
+        ndrop_total += wblk->ndrop;
+        if(wblk->ndrop >= PKTIDX_PER_BLOCK) {
+          // Assume one entire polrization is missing
+          ndrop_total -= PKTIDX_PER_BLOCK;
+        }
         // Shift working blocks
         wblk[0] = wblk[1];
         // Increment last working block
@@ -823,6 +839,9 @@ static void * run(hashpipe_thread_args_t * args)
 
       // Copy packet data to data buffer of working block
       copy_packet_data_to_databuf(pkt_seq_num, wblk+wblk_idx, vdifhdr);
+
+      // Count packet!
+      wblk[wblk_idx].npacket++;
     } // end for each packet
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &ts_stop_proc);
