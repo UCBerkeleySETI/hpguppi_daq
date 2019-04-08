@@ -824,16 +824,20 @@ static void * run(hashpipe_thread_args_t * args)
         wait_for_block_free(&wblk[1], &st, status_key);
       } else if(pkt_blk_num < wblk[0].block_num - 1
       || pkt_blk_num > wblk[1].block_num + 1) {
-        // Should "never" happen, so warn anbout it
+        // Should only happen when transitioning into LISTEN, so warn about it
         hashpipe_warn("hpguppi_pksuwl_net_thread",
             "working blocks reinit due to packet discontinuity (PKTIDX %lu)",
             pkt_seq_num);
-        // Re-init working blocks and clear their data buffers
+        // Re-init working blocks for next block number
+        // and clear their data buffers
         for(wblk_idx=0; wblk_idx<2; wblk_idx++) {
-          init_block_info(wblk+wblk_idx, NULL, -1, pkt_blk_num+wblk_idx);
+          init_block_info(wblk+wblk_idx, NULL, -1, pkt_blk_num+wblk_idx+1);
           // Clear data buffer
           memset(block_info_data(wblk+wblk_idx), 0, PKSUWL_BLOCK_DATA_SIZE);
         }
+#if 0
+// This happens after discontinuities (e.g. on startup), so don't warn about
+// it.
       } else if(pkt_blk_num == wblk[0].block_num - 1) {
         // Ignore late packet, continue on to next one
         // TODO Move this check above the "once per block" status buffer
@@ -843,20 +847,25 @@ static void * run(hashpipe_thread_args_t * args)
         hashpipe_warn("hpguppi_pksuwl_net_thread",
             "ignoring late packet (PKTIDX %lu)",
             pkt_seq_num);
-        continue;
+#endif
       }
 
       // TODO Check START/STOP status
 
-      // Once we get here, one of the working blocks is guaranteed to
-      // correspond to this packet.  Figure out which one.
+      // Once we get here, compute the index of the working block corresponding
+      // to this packet.  The computed index may not correspond to a valid
+      // working block!
       wblk_idx = pkt_blk_num - wblk[0].block_num;
 
-      // Copy packet data to data buffer of working block
-      copy_packet_data_to_databuf(pkt_seq_num, wblk+wblk_idx, vdifhdr);
+      // Only copy packet data and count packet if its wblk_idx is valid
+      if(0 <= wblk_idx && wblk_idx < 2) {
+        // Copy packet data to data buffer of working block
+        copy_packet_data_to_databuf(pkt_seq_num, wblk+wblk_idx, vdifhdr);
 
-      // Count packet!
-      wblk[wblk_idx].npacket++;
+        // Count packet for block
+        wblk[wblk_idx].npacket++;
+      }
+
     } // end for each packet
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &ts_stop_proc);
