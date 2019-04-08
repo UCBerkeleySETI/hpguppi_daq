@@ -231,7 +231,7 @@ static void wait_for_block_free(const struct block_info * bi,
       hputs(st->buf, "NETBUFST", netbuf_status);
       hashpipe_status_unlock_safe(st);
     } else {
-      hashpipe_error("hpguppi_mb128ch_net_thread",
+      hashpipe_error("hpguppi_pksuwl_net_thread",
           "error waiting for free databuf");
       pthread_exit(NULL);
     }
@@ -445,7 +445,7 @@ static void * run(hashpipe_thread_args_t * args)
   sprintf(fifo_name, "%s/%d", HPGUPPI_DAQ_CONTROL, args->instance_id);
   int fifo_fd = open(fifo_name, O_RDONLY | O_NONBLOCK);
   if (fifo_fd<0) {
-      hashpipe_error("hpguppi_mb128ch_net_thread", "Error opening control fifo)");
+      hashpipe_error("hpguppi_pksuwl_net_thread", "Error opening control fifo)");
       pthread_exit(NULL);
   }
   pollfd.fd = fifo_fd;
