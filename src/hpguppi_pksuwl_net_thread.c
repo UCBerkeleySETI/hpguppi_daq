@@ -214,10 +214,12 @@ static void wait_for_block_free(const struct block_info * bi,
     hashpipe_status_t * st, const char * status_key)
 {
   int rv;
-  char netbuf_status[81];
+  char netstat[80];
+  char netbuf_status[80];
   int netbuf_full = hpguppi_input_databuf_total_status(bi->db);
   sprintf(netbuf_status, "%d/%d", netbuf_full, bi->db->header.n_block);
   hashpipe_status_lock_safe(st);
+  hgets(st->buf, status_key, sizeof(netstat), netstat);
   hputs(st->buf, status_key, "waitfree");
   hputs(st->buf, "NETBUFST", netbuf_status);
   hashpipe_status_unlock_safe(st);
@@ -237,12 +239,13 @@ static void wait_for_block_free(const struct block_info * bi,
     }
   }
   hashpipe_status_lock_safe(st);
-  hputs(st->buf, status_key, "receiving");
+  hputs(st->buf, status_key, netstat);
   memcpy(block_info_header(bi), st->buf, HASHPIPE_STATUS_TOTAL_SIZE);
   hashpipe_status_unlock_safe(st);
 
   memset(block_info_data(bi), 0, PKSUWL_BLOCK_DATA_SIZE);
 }
+
 // The copy_packet_data_to_databuf() function does what it says: copies packet
 // data into a data buffer.  The data buffer block is identified by the
 // block_info structure pointed to by the bi parameter.  The vdifhdr parameter
@@ -343,6 +346,7 @@ static int init(hashpipe_thread_args_t *args)
   char dest_ip[80];
   char fifo_name[PATH_MAX];
   struct net_params * net_params;
+  const char * status_key = args->thread_desc->skey;
 
   // Create control FIFO (/tmp/hpguppi_daq_control/$inst_id)
   int rv = mkdir(HPGUPPI_DAQ_CONTROL, 0777);
@@ -414,6 +418,8 @@ static int init(hashpipe_thread_args_t *args)
     hputs(st.buf, "DESTIP", dest_ip);
     // Init stats fields to 0
     hputu8(st.buf, "NPKTS", 0);
+    // Set status_key to init
+    hputs(st.buf, status_key, "init");
   }
   hashpipe_status_unlock_safe(&st);
 
@@ -453,6 +459,13 @@ static void * run(hashpipe_thread_args_t * args)
 
   // Current run state
   enum run_states state = IDLE;
+  unsigned waiting = 0;
+  // Update status_key with idle state
+  hashpipe_status_lock_safe(&st);
+  {
+    hputs(st.buf, status_key, "idle");
+  }
+  hashpipe_status_unlock_safe(&st);
 
   // Misc counters, etc
   int rv;
@@ -460,8 +473,6 @@ static void * run(hashpipe_thread_args_t * args)
   char dest_ip_str[80] = {};
   // Numeric form of dest_ip
   struct in_addr dest_ip;
-  //TODO?unsigned force_new_block=0;
-  unsigned waiting=-1;
 
   // The incoming packets are placed in blocks that are eventually passed off
   // to the downstream thread.  We currently support two active blocks (aka
@@ -609,16 +620,18 @@ static void * run(hashpipe_thread_args_t * args)
         {
           hashpipe_error(
               "hpguppi_pksuwl_net_thread", "hashpipe_ibv_flow error");
-          // Stay in idle state loop
+          // Stay in IDLE state loop
           continue;
         }
 
+        // Transition to LISTEN state and start waiting for packets
         state = LISTEN;
-        // Update DAQSTATE
+        waiting = 1;
+        // Update DAQSTATE and status_key
         hashpipe_status_lock_safe(&st);
         {
-          // Update DAQSTATE
-          hputs(st.buf,  "DAQSTATE", "LISTEN");
+          hputs(st.buf, "DAQSTATE", "LISTEN");
+          hputs(st.buf, status_key, "waiting");
         }
         hashpipe_status_unlock_safe(&st);
       }
@@ -678,12 +691,14 @@ static void * run(hashpipe_thread_args_t * args)
                 "hpguppi_pksuwl_net_thread", "hashpipe_ibv_flow error");
           }
 
+          // Switch to IDLE state (and ensure waiting flag is clear)
           state = IDLE;
-          // Update DAQSTATE
+          waiting = 0;
+          // Update DAQSTATE and status_key
           hashpipe_status_lock_safe(&st);
           {
-            // Update DAQSTATE
-            hputs(st.buf,  "DAQSTATE", "IDLE");
+            hputs(st.buf, "DAQSTATE", "IDLE");
+            hputs(st.buf, status_key, "idle");
           }
           hashpipe_status_unlock_safe(&st);
         }
@@ -693,7 +708,7 @@ static void * run(hashpipe_thread_args_t * args)
       count_stat++;
 
       // Set status field to "waiting" if we are not getting packets
-      if (!hibv_rpkt && run_threads() && waiting!=1) {
+      if (!GOT_PACKET && run_threads() && state != IDLE && !waiting) {
         hashpipe_status_lock_safe(&st);
         {
           hputs(st.buf, status_key, "waiting");
@@ -713,7 +728,7 @@ static void * run(hashpipe_thread_args_t * args)
     }
 
     // Got packet(s)!  Update status if needed.
-    if (waiting!=0) {
+    if (waiting) {
       hashpipe_status_lock_safe(&st);
       {
         hputs(st.buf, status_key, "receiving");
