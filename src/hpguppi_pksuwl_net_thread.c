@@ -1,7 +1,16 @@
 // hpguppi_pksuwl_net_thread.c
 //
-// A Hashpipe thread that uses ibverbs to receive Parkes UWL packets from a
-// network interface.
+// A Hashpipe thread that receives Parkes UWL packets from a network interface.
+// This thread can be compiled to use packet sockets or InfiniBand Verbs for
+// packet capture.  The default is to compile for packet sockets (since they
+// seem to work better than ibverbs on ConnectX-3, go figure).  To compile for
+// ibverbs, add "-DUSE_IBVERBS" to CFLAGS when compiling.
+
+// TODO TEST Wait for first (second?) start-of-block when transitioning into
+//           LISTEN state so that the first block will be complete.
+// TODO Add PSPKTS and PSDRPS status buffer fields for pktsock
+// TODO TEST Set NETSTAE to idle in IDLE state
+// TODO TEST IP_DROP_MEMBERSHIP needs mcast IP address (i.e. not 0.0.0.0)
 
 //#define _GNU_SOURCE 1
 //#include <stdio.h>
@@ -23,18 +32,56 @@
 #include <arpa/inet.h>
 
 #include "hashpipe.h"
-#include "hashpipe_ibverbs.h"
-
 #include "hpguppi_databuf.h"
 #include "hpguppi_pksuwl.h"
 
-#define HPGUPPI_DAQ_CONTROL "/tmp/hpguppi_daq_control"
-#define MAX_CMD_LEN 1024
-
+#ifdef USE_IBVERBS
+#include "hashpipe_ibverbs.h"
 #define DEFAULT_MAX_PKT_SIZE (8400)
 #define DEFAULT_SEND_PKT_NUM (1)
 #define DEFAULT_RECV_PKT_NUM (16351)
 #define DEFAULT_MAX_FLOWS (1)
+#else
+#include <net/if.h> // Fpr IFNAMSIZ
+// Sizes for pktsock.  Make frame_size be a multiple of page size so that
+// frames will be contiguous and blocks will be page aligned in mapped mempory.
+#define PKTSOCK_BYTES_PER_FRAME (3*4096)
+#define PKTSOCK_FRAMES_PER_BLOCK (1024)
+#define PKTSOCK_NBLOCKS (64)
+#define PKTSOCK_NFRAMES (PKTSOCK_FRAMES_PER_BLOCK * PKTSOCK_NBLOCKS)
+
+// Adds or drops membership in a multicast group.  The `option` parameter
+// must be IP_ADD_MEMBERSHIP or IP_DROP_MEMBERSHIP.  The `dst_ip` parameter
+// specifies the multicast group to join.  If it is not a multicast address,
+// this function does nothing so it is safe to call this function
+// regardless of whether `dst_ip` is a multicast address.  Returns 0 on
+// success or `errno` on error.
+static int hpguppi_mcast_membership(int socket,
+    const char * ifname, int option, struct in_addr * dst_ip)
+{
+  struct ip_mreqn mreqn;
+
+  // Do nothing and return success if dst_ip is not multicast
+  if(!(IN_MULTICAST(ntohl(dst_ip->s_addr)))) {
+    return 0;
+  }
+
+  mreqn.imr_multiaddr.s_addr = dst_ip->s_addr;
+  mreqn.imr_address.s_addr = INADDR_ANY;
+  if((mreqn.imr_ifindex = if_nametoindex(ifname)) == 0) {
+    return errno;
+  }
+
+  if(setsockopt(socket, IPPROTO_IP, option, &mreqn, sizeof(mreqn))) {
+    return errno;
+  }
+
+  return 0;
+}
+#endif // USE_IBVERBS
+
+#define HPGUPPI_DAQ_CONTROL "/tmp/hpguppi_daq_control"
+#define MAX_CMD_LEN 1024
 
 // This code supports two possible PKSUWL_BLOCK_DATA_SIZE values.  One for a
 // power of two number of samples per block, and one for 1e6 times a power of
@@ -275,7 +322,7 @@ static void wait_for_block_free(const struct block_info * bi,
 // Differences between the PKSUWL VDIF format and the GUPPI RAW format require
 // manipulation of the packet data as it is copied into the GUPPI RAW formatted
 // data buffer.  Specifically, the polarizations must be interleaved and the
-// data values must be converted to two's complex form.
+// data values must be converted to two's complement form.
 //
 // This function treats the 16+16 bit complex samples as a single unsigned 32
 // bit integer (uint32_t).
@@ -324,7 +371,12 @@ static void copy_packet_data_to_databuf(uint64_t packet_idx,
 struct net_params {
   char ifname[IFNAMSIZ];
   int port;
+#ifdef USE_IBVERBS
   struct hashpipe_ibv_context hibv_ctx;
+#else
+  struct hashpipe_pktsock ps;
+  struct in_addr mcast_group;
+#endif // USE_IBVERBS
 };
 
 // This thread's init() function, if provided, is called by the Hashpipe
@@ -418,10 +470,31 @@ static int init(hashpipe_thread_args_t *args)
     hputs(st.buf, "DESTIP", dest_ip);
     // Init stats fields to 0
     hputu8(st.buf, "NPKTS", 0);
+    hputi4(st.buf, "NDROP", 0);
+#ifndef USE_IBVERBS
+    hputu8(st.buf, "PSPKTS", 0);
+    hputu8(st.buf, "PSDRPS", 0);
+#endif // !USE_IBVERBS
     // Set status_key to init
     hputs(st.buf, status_key, "init");
   }
   hashpipe_status_unlock_safe(&st);
+
+#ifndef USE_IBVERBS
+  // Set up pktsock
+  net_params->ps.frame_size = PKTSOCK_BYTES_PER_FRAME;
+  // total number of frames
+  net_params->ps.nframes = PKTSOCK_NFRAMES;
+  // number of blocks
+  net_params->ps.nblocks = PKTSOCK_NBLOCKS;
+
+  rv = hashpipe_pktsock_open(
+      &net_params->ps, net_params->ifname, PACKET_RX_RING);
+  if (rv!=HASHPIPE_OK) {
+      hashpipe_error("hpguppi_net_thread", "Error opening pktsock.");
+      pthread_exit(NULL);
+  }
+#endif // !USE_IBVERBS
 
   // Store net_params pointer in args
   args->user_data = net_params;
@@ -441,7 +514,13 @@ static void * run(hashpipe_thread_args_t * args)
   // Get a pointer to the net_params structure allocated and initialized in
   // init() as well as its hashpipe_ibv_context structure.
   struct net_params *net_params = (struct net_params *)args->user_data;
+#ifdef USE_IBVERBS
   struct hashpipe_ibv_context * hibv_ctx = &net_params->hibv_ctx;
+#else
+  struct hashpipe_pktsock * p_ps = &net_params->ps;
+  // An error return value will cause a later error if/when used
+  int mcast_subscriber = socket(AF_INET, SOCK_DGRAM, 0);
+#endif // USE_IBVERBS
 
   // Open command FIFO for read
   struct pollfd pollfd;
@@ -519,8 +598,14 @@ static void * run(hashpipe_thread_args_t * args)
   uint64_t ndrop_total = 0;
 
   // Variables for handing received packets
+#ifdef USE_IBVERBS
   struct hashpipe_ibv_recv_pkt * hibv_rpkt = NULL;
   struct hashpipe_ibv_recv_pkt * curr_rpkt;
+#else
+  unsigned char *p_frame;
+  unsigned int pspkts = 0;
+  unsigned int psdrps = 0;
+#endif // USE_IBVERBS
   struct vdifhdr * vdifhdr;
 
   // Variables for tracking timing stats
@@ -534,6 +619,13 @@ static void * run(hashpipe_thread_args_t * args)
   //TODO?uint64_t elapsed_proc = 0;
   //TODO?uint64_t count_proc = 0;
 
+  // Initialize working blocks
+  for(wblk_idx=0; wblk_idx<2; wblk_idx++) {
+    init_block_info(wblk+wblk_idx, db, wblk_idx, wblk_idx);
+    wait_for_block_free(wblk+wblk_idx, &st, status_key);
+  }
+
+#ifdef USE_IBVERBS
   // Set up ibverbs context
   strncpy(hibv_ctx->interface_name, net_params->ifname, IFNAMSIZ);
   hibv_ctx->interface_name[IFNAMSIZ-1] = '\0'; // Ensure NUL termination
@@ -559,12 +651,14 @@ static void * run(hashpipe_thread_args_t * args)
     hashpipe_error("hpguppi_pksuwl_net_thread", "Error initializing ibverbs.");
     return NULL;
   }
-
-  // Initialize working blocks
-  for(wblk_idx=0; wblk_idx<2; wblk_idx++) {
-    init_block_info(wblk+wblk_idx, db, wblk_idx, wblk_idx);
-    wait_for_block_free(wblk+wblk_idx, &st, status_key);
+#else
+  // Drop all pktsock packets to date
+  while((p_frame=hashpipe_pktsock_recv_frame_nonblock(p_ps))) {
+      hashpipe_pktsock_release_frame(p_frame);
   }
+  // Reset packet socket counters
+  hashpipe_pktsock_stats(p_ps, &pspkts, &psdrps);
+#endif // USE_IBVERBS
 
   // Main loop
   while (run_threads()) {
@@ -613,6 +707,7 @@ static void * run(hashpipe_thread_args_t * args)
       // means that it parses OK via inet_aton, not that it is correct and
       // actually usable.
       if(inet_aton(dest_ip_str, &dest_ip) && dest_ip.s_addr != INADDR_ANY) {
+#ifdef USE_IBVERBS
         // Add flow and change state to listen
         if(hashpipe_ibv_flow(hibv_ctx, 0, IBV_FLOW_SPEC_UDP,
               hibv_ctx->mac, NULL, 0, 0,
@@ -623,6 +718,21 @@ static void * run(hashpipe_thread_args_t * args)
           // Stay in IDLE state loop
           continue;
         }
+#else
+        // If multicast address
+        if((IN_MULTICAST(ntohl(dest_ip.s_addr)))) {
+          // IP_ADD_MEMBERSHIP
+          if(hpguppi_mcast_membership(mcast_subscriber,
+                net_params->ifname, IP_ADD_MEMBERSHIP, &dest_ip)) {
+            hashpipe_error("hpguppi_pksuwl_net_thread",
+                "could not add mcast membership for group %s", dest_ip_str);
+            // Stay in IDLE state loop
+            continue;
+          }
+          // Remember multicast group
+          net_params->mcast_group.s_addr = dest_ip.s_addr;
+        }
+#endif // USE_IBVERBS
 
         // Transition to LISTEN state and start waiting for packets
         state = LISTEN;
@@ -640,12 +750,24 @@ static void * run(hashpipe_thread_args_t * args)
     // Wait for data
     do {
       clock_gettime(CLOCK_MONOTONIC_RAW, &ts_start_recv);
+#ifdef USE_IBVERBS
+#define GOT_PACKET (hibv_rpkt)
       hibv_rpkt = hashpipe_ibv_recv_pkts(hibv_ctx, 1000); // 1 second timeout
+#else
+#define GOT_PACKET (p_frame)
+      p_frame = hashpipe_pktsock_recv_udp_frame(
+          p_ps, net_params->port, 1000); // 1 second timeout
+#endif // USE_IBVERBS
       clock_gettime(CLOCK_MONOTONIC_RAW, &ts_stop_recv);
 
-      if(!hibv_rpkt) {
+      if(!GOT_PACKET) {
         if(errno) {
-          perror("hashpipe_ibv_recv_pkt");
+#ifdef USE_IBVERBS
+          perror("hashpipe_ibv_recv_pkts");
+#else
+          perror("hashpipe_pktsock_recv_udp_frame");
+#endif // USE_IBVERBS
+          errno = 0;
           continue;
         }
         // Timeout?
@@ -683,6 +805,7 @@ static void * run(hashpipe_thread_args_t * args)
         // means that it fails to parse, not that it is incorrect or otherwise
         // unusable.
         if(!inet_aton(dest_ip_str, &dest_ip) || dest_ip.s_addr == INADDR_ANY) {
+#ifdef USE_IBVERBS
           // Remove flow and change state to listen
           if(hashpipe_ibv_flow(hibv_ctx, 0, IBV_FLOW_SPEC_UDP,
                 0, 0, 0, 0, 0, 0, 0, 0))
@@ -690,6 +813,17 @@ static void * run(hashpipe_thread_args_t * args)
             hashpipe_error(
                 "hpguppi_pksuwl_net_thread", "hashpipe_ibv_flow error");
           }
+#else
+          // IP_DROP_MEMBERSHIP
+          if(hpguppi_mcast_membership(mcast_subscriber,
+                net_params->ifname, IP_DROP_MEMBERSHIP, &net_params->mcast_group)) {
+            hashpipe_warn("hpguppi_pksuwl_net_thread",
+                "could not add mcast membership for group %.8x",
+                ntohl(net_params->mcast_group.s_addr));
+          }
+          // Forget mcast_group
+          net_params->mcast_group.s_addr = INADDR_ANY;
+#endif // USE_IBVERBS
 
           // Switch to IDLE state (and ensure waiting flag is clear)
           state = IDLE;
@@ -717,13 +851,17 @@ static void * run(hashpipe_thread_args_t * args)
         waiting=1;
       }
 
-    } while (!hibv_rpkt && run_threads()); // end wait for data loop
+    } while (!GOT_PACKET && run_threads()); // end wait for data loop
 
     if(!run_threads()) {
       // We're outta here!
+#ifdef USE_IBVERBS
       if(hashpipe_ibv_release_pkts(hibv_ctx, hibv_rpkt)) {
         perror("hashpipe_ibv_release_pkts");
       }
+#else
+      hashpipe_pktsock_release_frame(p_frame);
+#endif // USE_IBVERBS
       break;
     }
 
@@ -750,14 +888,20 @@ static void * run(hashpipe_thread_args_t * args)
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &ts_start_proc);
 
+#ifdef USE_IBVERBS
     // For each packet: process all packets
     for(curr_rpkt = hibv_rpkt; curr_rpkt;
         //curr_rpkt = (struct hashpipe_ibv_recv_pkt *)curr_rpkt->wr.next) {
         curr_rpkt = (struct hashpipe_ibv_recv_pkt *)(((struct ibv_recv_wr *)curr_rpkt)->next)) {
-      packet_count++;
-
       // Get pointer to vdifhdr
       vdifhdr = vdif_hdr_from_eth((void *)curr_rpkt->wr.sg_list->addr);
+#else
+      // Get pointer to vdifhdr
+      vdifhdr = (struct vdifhdr *)(PKT_UDP_DATA(p_frame));
+#endif // USE_IBVERBS
+
+      // Count packet
+      packet_count++;
 
       // Get packet index and absolute block number for packet
       pkt_seq_num = pksuwl_get_pktidx(vdifhdr);
@@ -793,6 +937,20 @@ static void * run(hashpipe_thread_args_t * args)
           hgetu8(st.buf, "NDROP", &u64tmp);
           u64tmp += ndrop_total; ndrop_total = 0;
           hputu8(st.buf, "NDROP", u64tmp);
+
+#ifndef USE_IBVERBS
+          // Update PSPKTS and PSDRPS
+          hashpipe_pktsock_stats(p_ps, &pspkts, &psdrps);
+
+          hgetu8(st.buf, "PSPKTS", &u64tmp);
+          u64tmp += pspkts;
+          hputu8(st.buf, "PSPKTS", u64tmp);
+
+          hgetu8(st.buf, "PSDRPS", &u64tmp);
+          u64tmp += psdrps;
+          hputu8(st.buf, "PSDRPS", u64tmp);
+#endif // !USE_IBVERBS
+
 // TODO
 #if 0
           // Calculate processing speed in Gbps (8*bytes/ns)
@@ -866,14 +1024,20 @@ static void * run(hashpipe_thread_args_t * args)
         wblk[wblk_idx].npacket++;
       }
 
+#ifdef USE_IBVERBS
     } // end for each packet
+#endif // USE_IBVERBS
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &ts_stop_proc);
 
     // Release packets
+#ifdef USE_IBVERBS
     if(hashpipe_ibv_release_pkts(hibv_ctx, hibv_rpkt)) {
       perror("hashpipe_ibv_release_pkts");
     }
+#else
+    hashpipe_pktsock_release_frame(p_frame);
+#endif // USE_IBVERBS
 
     // Will exit if thread has been cancelled
     pthread_testcancel();
