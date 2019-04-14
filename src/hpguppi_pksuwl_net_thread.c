@@ -83,31 +83,6 @@ static int hpguppi_mcast_membership(int socket,
 #define HPGUPPI_DAQ_CONTROL "/tmp/hpguppi_daq_control"
 #define MAX_CMD_LEN 1024
 
-// This code supports two possible PKSUWL_BLOCK_DATA_SIZE values.  One for a
-// power of two number of samples per block, and one for 1e6 times a power of
-// two samples per block.  The different block sizes lead to a different number
-// of packets per block per polarization, referred to as PKTIDX_PER_BLOCK.
-// Because PKTIDX values are shared across multiple polarizations, this is
-// inherently the number of PKTIDX per block per polarization.  The number of
-// packets per block is 2*PKTS_PER_PKTIDX*PKTIDX_PER_BLOCK, but PKTS_PER_PKTIDX
-// is 1 so that value is taken to be imlicit and is not explicitly defined.
-
-#ifdef USE_POWER_OF_TWO_NCHAN
-// If we use a power of two number of channels, the GUPPI RAW block is the same
-// as the shared memory block size and the number of PKTIDX values per block is
-// 8192.
-#define PKSUWL_BLOCK_DATA_SIZE (BLOCK_DATA_SIZE)
-#define PKTIDX_PER_BLOCK (8192)
-#else
-// For the 2**N * 1e6 channel options, we find that 5**5 * 2 == 6250 packets
-// per polarization span 0.1 seconds and both polarizations would occupy a
-// total of 102,400,000 bytes (clearly less than 128 MiB):
-//
-//     2**10 * 1e5 bytes == 2**13 bytes/pkt * (5**5 * 2) pkts/pol * 2 pols
-#define PKSUWL_BLOCK_DATA_SIZE (1024*10*1000) // in bytes
-#define PKTIDX_PER_BLOCK (6250)
-#endif // USE_POWER_OF_TWO_NCHAN
-
 #define ELAPSED_NS(start,stop) \
   (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
 
@@ -116,12 +91,12 @@ static int hpguppi_mcast_membership(int socket,
 //
 // In the LISTEN and RECORD states, the PKTIDX field is updated with the value
 // from received packets.  Whenever the first PKTIDX of a block is received
-// (i.e. whenever PKTIDX is a multiple of PKTIDX_PER_BLOCK), the value for
-// PKTSTART and DWELL are read from the status buffer.  PKTSTART is rounded
-// down, if needed, to ensure that it is a multiple of PKTIDX_PER_BLOCK, then
-// PKTSTART is written back to the status buffer.  DWELL is interpreted as the
-// number of seconds to record and is used to calculate PKTSTOP (which gets
-// rounded down, if needed, to be a multiple of PKTIDX_PER_BLOCK).
+// (i.e. whenever PKTIDX is a multiple of PKSUWL_PKTIDX_PER_BLOCK), the value
+// for PKTSTART and DWELL are read from the status buffer.  PKTSTART is rounded
+// down, if needed, to ensure that it is a multiple of PKSUWL_PKTIDX_PER_BLOCK,
+// then PKTSTART is written back to the status buffer.  DWELL is interpreted as
+// the number of seconds to record and is used to calculate PKTSTOP (which gets
+// rounded down, if needed, to be a multiple of PKSUWL_PKTIDX_PER_BLOCK).
 //
 // The IDLE state is entered when there is no DESTIP defined n the status
 // buffer or it is 0.0.0.0.  In the IDLE state, the DESTIP value in the status
@@ -218,9 +193,9 @@ static void finalize_block(struct block_info *bi)
   }
   char *header = block_info_header(bi);
   char dropstat[128];
-  bi->ndrop = (2 /*pols*/ * PKTIDX_PER_BLOCK) - bi->npacket;
-  sprintf(dropstat, "%d/%d", bi->ndrop, (2 /*pols*/ * PKTIDX_PER_BLOCK));
-  hputi8(header, "PKTIDX", bi->block_num * PKTIDX_PER_BLOCK);
+  bi->ndrop = (2 /*pols*/ * PKSUWL_PKTIDX_PER_BLOCK) - bi->npacket;
+  sprintf(dropstat, "%d/%d", bi->ndrop, (2 /*pols*/ * PKSUWL_PKTIDX_PER_BLOCK));
+  hputi8(header, "PKTIDX", bi->block_num * PKSUWL_PKTIDX_PER_BLOCK);
   hputi4(header, "NPKT", bi->npacket);
   hputi4(header, "NDROP", bi->ndrop);
   hputs(header, "DROPSTAT", dropstat);
@@ -334,7 +309,7 @@ static void copy_packet_data_to_databuf(uint64_t packet_idx,
   uint32_t * dst = (uint32_t *)block_info_data(bi);
 
   // Compute starting packet offset into data block
-  off_t offset = (off_t)(packet_idx % PKTIDX_PER_BLOCK);
+  off_t offset = (off_t)(packet_idx % PKSUWL_PKTIDX_PER_BLOCK);
   // Convert to sample (i.e. uint32_t) offset
   offset *= 2 /*pols*/ * PKSUWL_SAMPLES_PER_PKT;
   // Adjust for polarization
@@ -905,18 +880,18 @@ static void * run(hashpipe_thread_args_t * args)
 
       // Get packet index and absolute block number for packet
       pkt_seq_num = pksuwl_get_pktidx(vdifhdr);
-      pkt_blk_num = pkt_seq_num / PKTIDX_PER_BLOCK;
+      pkt_blk_num = pkt_seq_num / PKSUWL_PKTIDX_PER_BLOCK;
 
       // We update the status buffer at the start of each block (pol 0)
       // Also read PKTSTART, DWELL to calculate start/stop seq numbers.
-      if(pkt_seq_num % PKTIDX_PER_BLOCK == 0
+      if(pkt_seq_num % PKSUWL_PKTIDX_PER_BLOCK == 0
           && vdif_get_thread_id(vdifhdr) == 0) {
         hashpipe_status_lock_safe(&st);
         {
           hputi8(st.buf, "PKTIDX", pkt_seq_num);
           hputi8(st.buf, "PKTBLK", pkt_blk_num); // TODO do we want/need this?
           hgetu8(st.buf, "PKTSTART", &start_seq_num);
-          start_seq_num -= start_seq_num % PKTIDX_PER_BLOCK;
+          start_seq_num -= start_seq_num % PKSUWL_PKTIDX_PER_BLOCK;
           hputu8(st.buf, "PKTSTART", start_seq_num);
           hgetr8(st.buf, "DWELL", &dwell_seconds);
           hputr8(st.buf, "DWELL", dwell_seconds); // In case it wasn't there
@@ -929,9 +904,9 @@ static void * run(hashpipe_thread_args_t * args)
           //
           // To get an integer number of blocks, simply truncate
           dwell_blocks = trunc(dwell_seconds
-              / (tbin * PKSUWL_SAMPLES_PER_PKT * PKTIDX_PER_BLOCK));
+              / (tbin * PKSUWL_SAMPLES_PER_PKT * PKSUWL_PKTIDX_PER_BLOCK));
 
-          stop_seq_num = start_seq_num + PKTIDX_PER_BLOCK * dwell_blocks;
+          stop_seq_num = start_seq_num + PKSUWL_PKTIDX_PER_BLOCK * dwell_blocks;
           hputi8(st.buf, "PKTSTOP", stop_seq_num);
 
           hgetu8(st.buf, "NDROP", &u64tmp);
@@ -970,9 +945,9 @@ static void * run(hashpipe_thread_args_t * args)
         finalize_block(wblk);
         // Update ndrop counter
         ndrop_total += wblk->ndrop;
-        if(wblk->ndrop >= PKTIDX_PER_BLOCK) {
+        if(wblk->ndrop >= PKSUWL_PKTIDX_PER_BLOCK) {
           // Assume one entire polrization is missing
-          ndrop_total -= PKTIDX_PER_BLOCK;
+          ndrop_total -= PKSUWL_PKTIDX_PER_BLOCK;
         }
         // Shift working blocks
         wblk[0] = wblk[1];

@@ -150,6 +150,32 @@
 #define PKSUWL_PKTIDX_PER_SEC \
   (PKSUWL_SAMPLES_PER_SEC / PKSUWL_SAMPLES_PER_PKT)
 
+// This code supports two possible PKSUWL_BLOCK_DATA_SIZE values.  One for a
+// power of two number of samples per block, and one for 1e6 times a power of
+// two samples per block.  The different block sizes lead to a different number
+// of packets per block per polarization, referred to as
+// PKSUWL_PKTIDX_PER_BLOCK.  Because PKTIDX values are shared across multiple
+// polarizations, this is inherently the number of PKTIDX per block per
+// polarization.  The number of packets per block is
+// 2*PKSUWL_PKTIDX_PER_BLOCK/PKSUWL_PKTIDX_PER_PKT, but PKSUWL_PKTIDX_PER_PKT
+// is 1 so that value is taken to be implicit and is not explicitly defined.
+
+#ifdef USE_POWER_OF_TWO_NCHAN
+// If we use a power of two number of channels, the GUPPI RAW block is the same
+// as the shared memory block size and the number of PKTIDX values per block is
+// 8192.
+#define PKSUWL_BLOCK_DATA_SIZE (BLOCK_DATA_SIZE)
+#define PKSUWL_PKTIDX_PER_BLOCK (8192)
+#else
+// For the 2**N * 1e6 channel options, we find that 5**5 * 2 == 6250 packets
+// per polarization span 0.1 seconds and both polarizations would occupy a
+// total of 102,400,000 bytes (clearly less than 128 MiB):
+//
+//     2**10 * 1e5 bytes == 2**13 bytes/pkt * (5**5 * 2) pkts/pol * 2 pols
+#define PKSUWL_BLOCK_DATA_SIZE (1024*10*1000) // in bytes
+#define PKSUWL_PKTIDX_PER_BLOCK (6250)
+#endif // USE_POWER_OF_TWO_NCHAN
+
 static inline
 uint64_t
 pksuwl_get_pktidx(struct vdifhdr * p)
