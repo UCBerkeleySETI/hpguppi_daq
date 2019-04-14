@@ -22,6 +22,7 @@
 
 #include "hpguppi_databuf.h"
 #include "hpguppi_params.h"
+#include "hpguppi_pksuwl.h"
 
 // 80 character string for the BACKEND header record.
 static const char BACKEND_RECORD[] =
@@ -176,6 +177,7 @@ static int init(hashpipe_thread_args_t * args)
 {
     int i;
     uint32_t Nc = 0;
+    uint32_t Nbps = 8;
     rawspec_context * ctx;
     rawspec_callback_data_t * cb_data;
 
@@ -185,6 +187,8 @@ static int init(hashpipe_thread_args_t * args)
     hashpipe_status_lock_safe(&st);
     // Get Nc from OBSNCHAN
     hgetu4(st.buf, "OBSNCHAN", &Nc);
+    // Get Nbps from NBITS
+    hgetu4(st.buf, "NBITS", &Nbps);
     hashpipe_status_unlock_safe(&st);
 
     if(Nc == 0) {
@@ -205,19 +209,34 @@ static int init(hashpipe_thread_args_t * args)
     ctx->No = 3;
     ctx->Np = 2; // TODO Get from status buffer
     ctx->Nc = Nc;
-    ctx->Ntpb = calc_ntime_per_block(BLOCK_DATA_SIZE, Nc);
+    ctx->Nbps = Nbps;
     ctx->Npolout[0] = 1; // TODO Get from status buffer?
     ctx->Npolout[1] = 4; // TODO Get from status buffer?
     ctx->Npolout[2] = 4; // TODO Get from status buffer?
 
-    // Number of fine channels per coarse channel (i.e. FFT size).
-    ctx->Nts[0] = (1<<20);
-    ctx->Nts[1] = (1<<3);
-    ctx->Nts[2] = (1<<10);
-    // Number of fine spectra to accumulate per dump.
-    ctx->Nas[0] = 51;
-    ctx->Nas[1] = 128;
-    ctx->Nas[2] = 3072;
+    if(Nbps == 8) {
+      // Assume pre-PKSUWL (multibeam, other single pixel) data parameters.
+      ctx->Ntpb = calc_ntime_per_block(BLOCK_DATA_SIZE, Nc);
+      // Number of fine channels per coarse channel (i.e. FFT size).
+      ctx->Nts[0] = (1<<20);
+      ctx->Nts[1] = (1<<3);
+      ctx->Nts[2] = (1<<10);
+      // Number of fine spectra to accumulate per dump.
+      ctx->Nas[0] = 51;
+      ctx->Nas[1] = 128;
+      ctx->Nas[2] = 3072;
+    } else {
+      // Assume PKSUWL data parameters
+      ctx->Ntpb = PKSUWL_SAMPLES_PER_PKT * PKSUWL_PKTIDX_PER_BLOCK;
+      // Number of fine channels per coarse channel (i.e. FFT size).
+      ctx->Nts[0] = 64 * 1000 * 1000;
+      ctx->Nts[1] = 256;
+      ctx->Nts[2] = 64 * 1000;
+      // Number of fine spectra to accumulate per dump.
+      ctx->Nas[0] = 30;
+      ctx->Nas[1] = 50;
+      ctx->Nas[2] = 2000;
+    }
 
     ctx->dump_callback = rawspec_dump_callback;
 
