@@ -4,3 +4,4 @@
 # ... except for these...
 !.gitignore
 !hashpipe.m4
+!rawspec.m4
