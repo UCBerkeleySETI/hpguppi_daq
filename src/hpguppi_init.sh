@@ -80,18 +80,18 @@ function init() {
   fi
 
   echo taskset $mask \
-  hashpipe -p hpguppi_daq -I $instance \
-    -o BINDHOST=$bindhost \
-    -o BINDPORT=$bindport \
+  hashpipe -p ${hpguppi_plugin:-hpguppi_daq} -I $instance \
+    -o BINDHOST=${bindhost}${vlan} \
+    ${bindport:+-o BINDPORT=$bindport} \
     -o DATADIR=$dir \
     ${@} \
     -c $netcpu $net_thread \
     -c $outcpu $out_thread
 
   taskset $mask \
-  hashpipe -p hpguppi_daq -I $instance \
-    -o BINDHOST=$bindhost \
-    -o BINDPORT=$bindport \
+  hashpipe -p ${hpguppi_plugin:-hpguppi_daq} -I $instance \
+    -o BINDHOST=${bindhost}${vlan} \
+    ${bindport:+-o BINDPORT=$bindport} \
     -o DATADIR=$dir \
     ${@} \
     -c $netcpu $net_thread \
@@ -105,6 +105,7 @@ redis_sync_key=sync_time
 net_thread=hpguppi_net_thread
 out_thread=hpguppi_rawdisk_thread
 bindport=60000
+vlan=
 
 if [ "$1" = 'fakefake' ]
 then
@@ -127,6 +128,18 @@ then
   net_thread=hpguppi_mb128ch_net_thread
   bindport=$((0x4D42)) # ASCII 0x4D 0x42 is "MB" (for MultiBeam)
   shift
+elif [ "$1" = 'pksuwl' ]
+then
+  redis_sync_key=
+  hpguppi_plugin=/home/davidm/local/src/hpguppi_daq/src/.libs/hpguppi_daq.so
+  net_thread=hpguppi_pksuwl_net_thread
+  # BINDPORT must be passed as a separate "-o BINDPORT=1234" command line
+  # option by caller (e.g. hpguppi_pksuwl_init.sh)
+  bindport=
+  vlan='.2'
+  # For initial testing...
+  out_thread=null_output_thread
+  shift
 elif echo "$1" | grep -q 'thread'
 then
   out_thread="$1"
@@ -136,7 +149,7 @@ fi
 # Exit if no instance id is given
 if [ -z "$1" ]
 then
-  echo "Usage: $(basename $0) [mb1|mb128ch|fake|fakefake] INSTANCE_ID [...] [OPTIONS]"
+  echo "Usage: $(basename $0) [mb1|mb128ch|pksuwlfake|fakefake] INSTANCE_ID [...] [OPTIONS]"
   exit 1
 fi
 
@@ -157,7 +170,12 @@ do
 done
 
 # Get sync time from redis
-sync_time=`redis-cli -h redishost get $redis_sync_key | tr -d '"'`
+if [ -n "${redis_sync_key}" ]
+then
+  sync_time=`redis-cli -h redishost get $redis_sync_key | tr -d '"'`
+else
+  sync_time=0
+fi
 
 for instidx in $instance_ids
 do
