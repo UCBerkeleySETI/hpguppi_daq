@@ -61,10 +61,16 @@ function init() {
   outcpu=$6
   shift 6
 
+  workdir="${dir}"
+
   if [ -z "${dir}" ]
   then
     echo "Invalid instance number '${instance:-[unspecified]}' (ignored)"
     return 1
+  elif [ "${dir}" == "/buf0" ]
+  then
+    # Don't want to output messages to NVMe directory
+    workdir=/tmp
   fi
 
   if [ -z "$outcpu" ]
@@ -73,9 +79,9 @@ function init() {
     return 1
   fi
 
-  if ! cd "${dir}"
+  if ! cd "${workdir}"
   then
-    echo "Invalid working directory ${dir} (ignored)"
+    echo "Invalid working directory ${workdir} (ignored)"
     return 1
   fi
 
@@ -140,6 +146,16 @@ then
   # For initial testing...
   out_thread=null_output_thread
   shift
+elif [ "$1" = 'meerkat' ]
+then
+  redis_sync_key=
+  net_thread=hpguppi_meerkat_net_thread
+  bindport=7148
+  instances[0]="${instances[0]/datax/buf0}"
+  instances[1]="${instances[1]/datax2/buf1}"
+  # For initial testing...
+  out_thread=null_output_thread
+  shift
 elif echo "$1" | grep -q 'thread'
 then
   out_thread="$1"
@@ -149,7 +165,7 @@ fi
 # Exit if no instance id is given
 if [ -z "$1" ]
 then
-  echo "Usage: $(basename $0) [mb1|mb128ch|pksuwlfake|fakefake] INSTANCE_ID [...] [OPTIONS]"
+  echo "Usage: $(basename $0) [mb1|mb128ch|pksuwl|meerkat|fake|fakefake] INSTANCE_ID [...] [OPTIONS]"
   exit 1
 fi
 
