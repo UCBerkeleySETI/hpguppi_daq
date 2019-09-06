@@ -121,189 +121,225 @@
 // tricky part is determineing the correct offset within the data block to use
 // as the destination of the copy operation.
 //
-// ------ cut here ------ Old Parkes info below -----
-//
-// The Parkes Ultra-Wideband Low recevier digitizes the signal within the
-// receiver itself.  These data are then channelized into 128 MHz wide
-// critically sampled sub-bands and sent out via multicast UDP packets
-// containing VDIF formatted data.  Each packet contains a single VDIF data
-// frame consisting of a VDIF data header and a VDIF data array.  The VDIF data
-// array contains 2048 time samples of a single polarization of a single 128
-// MHz sub-band.  Each sample is a 16 bit real + 16 bit imaginary complex
-// voltage.
-//
-// Because the samples are complex, the sampling period for a sub-band is
-// 1/128e6 seconds per sample (i.e. 7.8125 ns/sample).  Each packet therefore
-// spans 2048/128e6 seconds (i.e. 16 usec/packet).  The number of packets per
-// second per polarization is 128e6/2048 (i.e. 62500 packets per second per
-// polarization).
-//
-// ## GUPPI RAW Blocks and Shared Memory Blocks
-//
-// The GUPPI RAW format stores data in fixed sized blocks.  The hpguppi network
-// threads for other receivers use a shared memory block size of 128 MiB (i.e.
-// 128*1024*1024).  To facilitate compatibility with these other network
-// threads, the hpguppi_pksuwl_net_thread also uses a shared memory block size
-// of 128 MiB, but it creates GUPPI RAW blocks that are that size or smaller.
-//
-// The GUPPI RAW block size must also be an integer multiple of the packet size
-// to avoid compilcations arising from splitting a packet across block
-// boundaries.
-//
-// Another constraint on block size is that the real-time spectroscopy code
-// (i.e. rawspec) only works on an integer number of blocks.  This means that
-// the highest spectral resolution desired must use an integer multiple of
-// blocks.  The spectroscopy code also places constraints on the resolution of
-// other (lower resolution) products computed at the same time as well as their
-// integration times, but those constraints do not affect the block sizing.
-//
-// ## Block Size and Spectral Resolution
-//
-// Given that the highest desired spectral resoultion is ~1 Hz per channel,
-// some possible spectral resolutions for a 128 MHz sub-band are:
-//
-//     128e6 Hz / 2**27 channels == 0.954 Hz/channel, 1.049 sec/spectrum
-//     128e6 Hz / 128e6 channels == 1.000 Hz/channel, 1.000 sec/spectrum
-//     128e6 Hz / 2**26 channels == 1.907 Hz/channel, 0.524 sec/spectrum
-//     128e6 Hz /  64e6 channels == 2.000 Hz/channel, 0.500 sec/spectrum
-//
-// The 2**N channel options are appealing in terms of FFT efficiency and
-// simplicity, but the spectrum would rarely align with one second boundaries.
-// The 2**N * 1e6 channel options provide "cleaner" alignment with one second
-// boundaries, but are not as simple in terms of FFTs.  Fortunately, modern FFT
-// libraries (e.g. FFTW and CuFFT) are well suited for handling FFT lengths
-// that are a product of powers of small primes (2 and 5 in the cases presented
-// here).
-//
-// For the 2**N channel options, the shared memory block size of 128 MiB ==
-// 2**27 will fit 2**13 == 8192 packets from each polarization:
-//
-//     2**27 bytes = 2**13 bytes/packet * 2**13 packets/pol * 2 pols
-//
-// This works out to 2**24 samples per block per pol, so 2**27 channels would
-// require 2**3 blocks and 2**26 channels would require 2**2 blocks.
-//
-// For the 2**N * 1e6 channel options, we find that 5**5 * 2 == 6250 packets
-// per polarization span 0.1 seconds and both polarizations would occupy a
-// total of 102,400,000 bytes (clearly less than 128 MiB):
-//
-//     2**10 * 1e5 bytes == 2**13 bytes/pkt * (5**5 * 2) pkts/pol * 2 pols
-//
-// For a 0.1 second block duration, it can be seen that 2 Hz resolution would
-// require 5 blocks (0.5 seconds) and 1 Hz resolution would require 10 blocks
-// (1 second).
-//
-// ## VDIF to GUPPI RAW Conversion
-//
-// ### Polarization handling
-//
-// The VDIF formatted data from each polarization arrive in separate packets,
-// but the GUPPI RAW format (and rawspec) requires that the two polarizations
-// be interleaved.  This requires some extra data manipulation when placing
-// packet data in the GUPPI RAW shared memory blocks.
-//
-// ### Integer representation
-//
-// VDIF formatted data represents integer values in offset binary form.  GUPPI
-// RAW represents integer values using two's complement form.  The VDIF data
-// must be converted from offset binary representation to the two's complement
-// representation used by GUPPI RAW.  This can be performed by simply inverting
-// the most significant bit of each interger value.
-//
-// VDIF specifies that multi-byte values, such as the 16 bit samples from the
-// Parkes UWL receiver, be passed in little endian format (i.e. least
-// significant byte first).  It is not clear which endianess is used by the
-// RAW format, but for now we will optimistically assume that it is also
-// little-endian.
-//
-// ## Time representation
-//
-// VDIF and GUPPI RAW also differ in how they track time.  VDIF uses three
-// fields: a reference epoch, the number of seconds since the reference epoch,
-// and the data frame (i.e. packet) sequence number within the second.  GUPPI
-// RAW uses a number of independent fields to represent time in different ways,
-// but the most precise one is PXTIDX (packet index).  PKTIDX is a
-// monotonically increasing counter that has a direct relationship to elapsed
-// time since the counter was last reset.  By knowing this relationship and the
-// time at which the counter was reset, the absolute time corresponding to a
-// given PKTIDX can be calculated.  In practice, conversion to absolute time is
-// rarely performed.  More often, absolute times (scan start, scan stop, etc)
-// are converted into PKTIDX values.  PKTIDX is used to reassemble the packets
-// into a continuous sequence of data and to control the start/stop of
-// recording based on absolute times that have been converted to values in the
-// same timebase as PKTIDX.
-//
-// The Parkes UWL recevier has an integer number of packet per second per
-// polarization, so a PKTIDX counter can be synthesized from the VDIF time
-// representation.  The second represented by the reference epoch and seconds
-// since the reference epoch is converted to seconds since the UNIX epoch
-// (1970-01-01 00:00:00 UTC), multiplied by packets per second per
-// polarization, and then added to the packet sequence number within the
-// second.
-//
-// ## Other Miscellaneous Comments
-//
-// The smallest atomic component of a GUPPI RAW block can be referred to as a
-// "block unit".  The 2048 time samples of a packet define the time dimension
-// of a block unit.  Each block unit will be comprised of two packets, one per
-// polarization for the same 2048 sample timespan.  The two polarization
-// samples for a given sample time define the second dimension of the block
-// unit.  In the Parkes UWL case, with dual polarization 16-bit complex
-// samples, this second dimension of a block unit is 8 bytes.  This means that
-// a block unit is 16384 bytes (2048 time samples * 8 bytes per time sample).
-//
 
-#ifndef _HPGUPPI_PKSUWL_H_
-#define _HPGUPPI_PKSUWL_H_
+#ifndef _HPGUPPI_MKFENG_H_
+#define _HPGUPPI_MKFENG_H_
 
+#include <endian.h>
 #include "hashpipe_packet.h"
-#include "hpguppi_vdif.h"
 
-#define PKSUWL_SAMPLES_PER_SEC (128*1000*1000)
+#define SPEAD_ID_IMM_IGNORE         (0x8000)
+#define SPEAD_ID_IMM_HEAP_COUNTER   (0x8001)
+#define SPEAD_ID_IMM_HEAP_SIZE      (0x8002)
+#define SPEAD_ID_IMM_HEAP_OFFSET    (0x8003)
+#define SPEAD_ID_IMM_PAYLOAD_SIZE   (0x8004)
+#define SPEAD_ID_IMM_TIMESTAMP      (0x9600)
+#define SPEAD_ID_IMM_FENG_ID        (0xc101)
+#define SPEAD_ID_IMM_FENG_CHAN      (0xc103)
+#define SPEAD_ID_IMM_PAYLOAD_OFFSET (0x4300)
 
-// This could be derived from packet data.
-// data_array_size / 2 (for 16 bit samples) / 2 for complex samples
-#define PKSUWL_SAMPLES_PER_PKT (8192/2/2)
+struct mk_feng_spead_info {
+  uint64_t heap_counter;
+  uint64_t heap_size;
+  uint64_t heap_offset;
+  uint64_t payload_size;
+  uint64_t timestamp;
+  uint64_t feng_id;
+  uint64_t feng_chan;
+};
 
-#define PKSUWL_NS_PER_PKT \
-  ((1000UL*1000*1000*PKSUWL_SAMPLES_PER_PKT) / PKSUWL_SAMPLES_PER_SEC)
+// Parameters describing various data dimensions for a MeerKAT observation.
+// Only schan can meaningfully be zero, all other fields should be non-zero.
+// Structure is valid if all fields are non-zero except for schan which is
+// valid except for -1.
+struct mk_obs_info {
+  // Total numner of F Engine channels
+  uint32_t fenchan;
+  // Total number of antennas in current subarray
+  uint32_t nants;
+  // Total number of streams being processed
+  uint32_t nstrm;
+  // Number of time samples per heap
+  uint32_t hntime;
+  // Number of frequency channels per heap
+  uint32_t hnchan;
+  // Number of ADC samples (clock cycles) per heap
+  uint64_t hclocks;
+  // Starting F Engine channel number to be processed
+  int32_t schan;
+};
 
-#define PKSUWL_PKTIDX_PER_SEC \
-  (PKSUWL_SAMPLES_PER_SEC / PKSUWL_SAMPLES_PER_PKT)
+#define MK_OBS_INFO_INVALID_SCHAN (-1)
 
-// This code supports two possible PKSUWL_BLOCK_DATA_SIZE values.  One for a
-// power of two number of samples per block, and one for 1e6 times a power of
-// two samples per block.  The different block sizes lead to a different number
-// of packets per block per polarization, referred to as
-// PKSUWL_PKTIDX_PER_BLOCK.  Because PKTIDX values are shared across multiple
-// polarizations, this is inherently the number of PKTIDX per block per
-// polarization.  The number of packets per block is
-// 2*PKSUWL_PKTIDX_PER_BLOCK/PKSUWL_PKTIDX_PER_PKT, but PKSUWL_PKTIDX_PER_PKT
-// is 1 so that value is taken to be implicit and is not explicitly defined.
+// Initialize all mk_obs_info fields to invalid values
+static inline
+void
+mk_obs_info_init(struct mk_obs_info * poi)
+{
+  memset(poi, 0, sizeof(struct mk_obs_info));
+  poi->schan = MK_OBS_INFO_INVALID_SCHAN;
+}
 
-#ifdef USE_POWER_OF_TWO_NCHAN
-// If we use a power of two number of channels, the GUPPI RAW block is the same
-// as the shared memory block size and the number of PKTIDX values per block is
-// 8192.
-#define PKSUWL_BLOCK_DATA_SIZE (BLOCK_DATA_SIZE)
-#define PKSUWL_PKTIDX_PER_BLOCK (8192)
-#else
-// For the 2**N * 1e6 channel options, we find that 5**5 * 2 == 6250 packets
-// per polarization span 0.1 seconds and both polarizations would occupy a
-// total of 102,400,000 bytes (clearly less than 128 MiB):
-//
-//     2**10 * 1e5 bytes == 2**13 bytes/pkt * (5**5 * 2) pkts/pol * 2 pols
-#define PKSUWL_BLOCK_DATA_SIZE (1024*10*1000) // in bytes
-#define PKSUWL_PKTIDX_PER_BLOCK (6250)
-#endif // USE_POWER_OF_TWO_NCHAN
+static inline
+int
+mk_obs_info_valid(const struct mk_obs_info oi)
+{
+  return
+    (oi.fenchan != 0) &&
+    (oi.nants   != 0) &&
+    (oi.nstrm   != 0) &&
+    (oi.hntime  != 0) &&
+    (oi.hnchan  != 0) &&
+    (oi.hclocks != 0) &&
+    (oi.schan   != MK_OBS_INFO_INVALID_SCHAN);
+}
+
+static inline
+uint32_t
+spead_id(uint64_t item)
+{
+  return (item >> 48);
+}
 
 static inline
 uint64_t
-pksuwl_get_pktidx(struct vdifhdr * p)
+spead_imm_value(uint64_t item)
 {
-  uint64_t pktidx = ((uint64_t)PKSUWL_PKTIDX_PER_SEC) * vdif_get_time(p);
-  pktidx += vdif_get_data_frame_seq(p);
-  return pktidx;
+  return item & ((1ULL<<48) - 1);
 }
 
-#endif // _HPGUPPI_PKSUWL_H_
+static inline
+uint64_t
+calc_mk_pktidx(uint64_t timestamp, uint64_t hclocks)
+{
+  return timestamp / hclocks;
+}
+
+static inline
+uint64_t
+mk_pktidx(const struct mk_obs_info oi, const struct mk_feng_spead_info fesi)
+{
+  return calc_mk_pktidx(fesi.timestamp, oi.hclocks);
+}
+
+// For MeerKAT, the NCHAN parameter represents the total number of frequency
+// channels processed.  It is the number of antennas times the number of
+// streams per antenna times the number of channels per heap/stream.
+static inline
+uint32_t
+calc_mk_nchan(uint32_t nants, uint32_t nstrm, uint32_t hnchan)
+{
+  return nants * nstrm * hnchan;
+}
+
+static inline
+uint32_t
+mk_nchan(const struct mk_obs_info oi)
+{
+  return calc_mk_nchan(oi.nants, oi.nstrm, oi.hnchan);
+}
+
+// Calculate the block's channel number for a given feng_id's feng_chan.  Needs
+// to know numner of streams per antenna (nstrm), number of channels per
+// stream/heap (hnchan), and the start channel of the instance (schan).
+static inline
+uint64_t
+calc_mk_block_chan(uint64_t feng_id, uint32_t nstrm,
+    uint32_t hnchan, uint64_t feng_chan, uint32_t schan)
+{
+  return feng_chan * nstrm * hnchan + (feng_chan - schan);
+}
+
+static inline
+uint64_t
+mk_block_chan(const struct mk_obs_info oi, const struct mk_feng_spead_info fesi)
+{
+  return calc_mk_block_chan(fesi.feng_chan, oi.nstrm,
+      oi.hnchan, fesi.feng_chan, oi.schan);
+}
+
+// Calculate the number of pktidx values per block.
+// Assumes sample size is 4 bytes.
+static inline
+uint32_t
+calc_mk_pktidx_per_block(size_t block_size, uint32_t nchan, uint32_t hntime)
+{
+  return (uint32_t)(block_size / (4 * nchan * hntime));
+}
+
+static inline
+uint32_t
+mk_pktidx_per_block(size_t block_size, const struct mk_obs_info oi)
+{
+  return calc_mk_pktidx_per_block(block_size, mk_nchan(oi), oi.hntime);
+}
+
+// For MeerKAT, the NTIME parameter (not stored in the status buffer or GUPPI
+// RAW files), represents the total number of time samples in a block.
+// It depends on the block size and NCHAN (and sample size, but that is assumed
+// to be 4 bytes).
+static inline
+uint32_t
+calc_mk_ntime(size_t block_size, uint32_t nchan)
+{
+  return (uint32_t)(block_size / (4 * nchan));
+}
+
+static inline
+uint32_t
+mk_ntime(size_t block_size, const struct mk_obs_info oi)
+{
+  return calc_mk_ntime(block_size, mk_nchan(oi));
+}
+
+// Parses a MeerKAT F Engine packet, stores metadata in fesi, returns pointer
+// to packet's spead payload.
+static inline
+uint8_t *
+mk_parse_mkfeng_packet(const struct udppkt *p, struct mk_feng_spead_info * fesi)
+{
+  uint32_t i;
+  uint64_t item;
+  uint8_t * p_spead_payload;
+  uint64_t * p_spead = (uint64_t *)p->payload;
+  uint32_t nitems = be64toh(*p_spead++) & 0xffff;
+  uint64_t offset = 0;
+
+  for(i=0; i<nitems; i++) {
+    item = *p_spead++;
+    switch(spead_id(item)) {
+      case SPEAD_ID_IMM_HEAP_COUNTER:
+        fesi->heap_counter = spead_imm_value(item);
+        break;
+      case SPEAD_ID_IMM_HEAP_SIZE:
+        fesi->heap_size = spead_imm_value(item);
+        break;
+      case SPEAD_ID_IMM_HEAP_OFFSET:
+        fesi->heap_offset = spead_imm_value(item);
+        break;
+      case SPEAD_ID_IMM_PAYLOAD_SIZE:
+        fesi->payload_size = spead_imm_value(item);
+        break;
+      case SPEAD_ID_IMM_TIMESTAMP:
+        fesi->timestamp = spead_imm_value(item);
+        break;
+      case SPEAD_ID_IMM_FENG_ID:
+        fesi->feng_id = spead_imm_value(item);
+        break;
+      case SPEAD_ID_IMM_FENG_CHAN:
+        fesi->feng_chan = spead_imm_value(item);
+        break;
+      case SPEAD_ID_IMM_PAYLOAD_OFFSET:
+        offset = spead_imm_value(item);
+        break;
+      default:
+        // Ignore
+        break;
+    }
+  }
+
+  p_spead_payload = ((uint8_t *)p_spead) + offset;
+  return p_spead_payload;
+}
+
+#endif // _HPGUPPI_MKFENG_H_

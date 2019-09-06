@@ -33,7 +33,7 @@
 
 #include "hashpipe.h"
 #include "hpguppi_databuf.h"
-#include "hpguppi_meerkat.h"
+#include "hpguppi_mkfeng.h"
 
 #ifdef USE_IBVERBS
 #include "hashpipe_ibverbs.h"
@@ -91,14 +91,14 @@ static int hpguppi_mcast_membership(int socket,
 //
 // In the LISTEN and RECORD states, the PKTIDX field is updated with the value
 // from received packets.  Whenever the first PKTIDX of a block is received
-// (i.e. whenever PKTIDX is a multiple of PKSUWL_PKTIDX_PER_BLOCK), the value
+// (i.e. whenever PKTIDX is a multiple of pktidx_per_block), the value
 // for PKTSTART and DWELL are read from the status buffer.  PKTSTART is rounded
-// down, if needed, to ensure that it is a multiple of PKSUWL_PKTIDX_PER_BLOCK,
+// down, if needed, to ensure that it is a multiple of pktidx_per_block,
 // then PKTSTART is written back to the status buffer.  DWELL is interpreted as
 // the number of seconds to record and is used to calculate PKTSTOP (which gets
-// rounded down, if needed, to be a multiple of PKSUWL_PKTIDX_PER_BLOCK).
+// rounded down, if needed, to be a multiple of pktidx_per_block).
 //
-// The IDLE state is entered when there is no DESTIP defined n the status
+// The IDLE state is entered when there is no DESTIP defined in the status
 // buffer or it is 0.0.0.0.  In the IDLE state, the DESTIP value in the status
 // buffer is checked once per second.  If it is found to be something other
 // than 0.0.0.0, the state transitions to the LISTEN state and the current
@@ -107,7 +107,7 @@ static int hpguppi_mcast_membership(int socket,
 // To be operationally compatible with other hpguppi net threads, a "command
 // FIFO" is created and read from in all states, but commands sent there are
 // ignored.  State transitions are controlled entirely by DESTIP and
-// PKTSTART/SWELL status buffer fields.
+// PKTSTART/DWELL status buffer fields.
 //
 // In the LISTEN state, incoming packets are processed (i.e. stored in the net
 // thread's output buffer) and full blocks are passed to the next thread.  When
@@ -142,6 +142,8 @@ struct block_info {
   // Set at start of block
   int block_idx;                    // Block index number in databuf
   uint64_t block_num;               // Absolute block number
+  uint64_t pktidx_per_block;
+  uint64_t pkts_per_block;
   // Incremented throughout duration of block
   uint32_t npacket;                 // Number of packets recevied so far
   // Fields set during block finalization
@@ -171,8 +173,10 @@ static void reset_block_info_stats(struct block_info *bi)
 // bi->db is set if db is non-NULL.
 // bi->block_idx is set if block_idx >= 0.
 // bi->block_num is always set and the stats are always reset.
+// bi->pkts_per_block is set of pkt_size > 0.
 static void init_block_info(struct block_info *bi,
-    struct hpguppi_input_databuf *db, int block_idx, uint64_t block_num)
+    struct hpguppi_input_databuf *db, int block_idx, uint64_t block_num,
+    uint64_t pkt_size)
 {
   if(db) {
     bi->db = db;
@@ -181,6 +185,11 @@ static void init_block_info(struct block_info *bi,
     bi->block_idx = block_idx;
   }
   bi->block_num = block_num;
+  // Must be set later
+  bi->pktidx_per_block = 0;
+  if(pkt_size > 0) {
+    bi->pkts_per_block = BLOCK_DATA_SIZE / pkt_size;
+  }
   reset_block_info_stats(bi);
 }
 
@@ -193,9 +202,9 @@ static void finalize_block(struct block_info *bi)
   }
   char *header = block_info_header(bi);
   char dropstat[128];
-  bi->ndrop = (2 /*pols*/ * PKSUWL_PKTIDX_PER_BLOCK) - bi->npacket;
-  sprintf(dropstat, "%d/%d", bi->ndrop, (2 /*pols*/ * PKSUWL_PKTIDX_PER_BLOCK));
-  hputi8(header, "PKTIDX", bi->block_num * PKSUWL_PKTIDX_PER_BLOCK);
+  bi->ndrop = (BLOCK_DATA_SIZE / bi->pkts_per_block) - bi->npacket;
+  sprintf(dropstat, "%d/%lu", bi->ndrop, (BLOCK_DATA_SIZE / bi->pkts_per_block));
+  hputi8(header, "PKTIDX", bi->block_num * bi->pktidx_per_block);
   hputi4(header, "NPKT", bi->npacket);
   hputi4(header, "NDROP", bi->ndrop);
   hputs(header, "DROPSTAT", dropstat);
@@ -265,63 +274,46 @@ static void wait_for_block_free(const struct block_info * bi,
   memcpy(block_info_header(bi), st->buf, HASHPIPE_STATUS_TOTAL_SIZE);
   hashpipe_status_unlock_safe(st);
 
-  memset(block_info_data(bi), 0, PKSUWL_BLOCK_DATA_SIZE);
+  memset(block_info_data(bi), 0, BLOCK_DATA_SIZE);
 }
 
 // The copy_packet_data_to_databuf() function does what it says: copies packet
-// data into a data buffer.  The data buffer block is identified by the
-// block_info structure pointed to by the bi parameter.  The vdifhdr parameter
-// points to the "struct vdifhdr" structure at the beginning of the VDIF
-// payload of the packet.  The data array immediately follows the VDIF header
-// with a start address of (vdifhdr+1) thanks to pointer arithmetic.
+// data into a data buffer.
 //
-// VDIF data in a PKSUWL packet are for a single polarization.  The
-// polarization is indicated by a 0 or 1 in the VDIF thread_id field.  The VDIF
-// data array in a PKSUWL packet has the following properties:
+// The data buffer block is identified by the block_info structure pointed to
+// by the bi parameter.
 //
-//   1. Only from one of two polarizations with polarization indicated by a 0
-//      or 1 in the VDIF header thread_id field.
-//   2. Data consist of complex samples.  This fact is represented in the
-//      VDIF header, but this code assumes and does does not validate that
-//      the header specifies complex.
-//   3. Each component of a compelx sample is 16 bits.  This fact is
-//      represented in the VDIF header, but this code assumes and does not
-//      validate that the header specifies 16 bits.
-//   4. Each integer value is represented in offset binary form (0
-//      corresponds to the most negative vaslue).  This is mandated by the
-//      VDIF spec and is not indicated in the VDIF header.
-//   5. The data array contains 8192 bytes (2048 complex samples).  This fact
-//      is represented in the VDIF header, but this code assumes and does not
-//      verify the the header specifies 8192 bytes.
+// The p_oi parameter points to the observation's obs_info data.
 //
-// Differences between the PKSUWL VDIF format and the GUPPI RAW format require
-// manipulation of the packet data as it is copied into the GUPPI RAW formatted
-// data buffer.  Specifically, the polarizations must be interleaved and the
-// data values must be converted to two's complement form.
+// The p_fesi parameter points to an mk_feng_spead_info packet containing the
+// packet's spead metadata.
 //
-// This function treats the 16+16 bit complex samples as a single unsigned 32
-// bit integer (uint32_t).
-static void copy_packet_data_to_databuf(uint64_t packet_idx,
-    struct block_info *bi, struct vdifhdr * vdifhdr)
+// The p_spead_payload parameter points to the spead payload of the packet.
+static void copy_packet_data_to_databuf(struct block_info *bi,
+    const struct mk_obs_info * p_oi,
+    const struct mk_feng_spead_info * p_fesi,
+    uint8_t * p_spead_payload)
 {
   int i;
-  uint32_t * src = (uint32_t *)(vdifhdr + 1);
-  uint32_t * dst = (uint32_t *)block_info_data(bi);
+  uint8_t * src = p_spead_payload;
+  uint8_t * dst = (uint8_t *)block_info_data(bi);
 
-  // Compute starting packet offset into data block
-  off_t offset = (off_t)(packet_idx % PKSUWL_PKTIDX_PER_BLOCK);
-  // Convert to sample (i.e. uint32_t) offset
-  offset *= 2 /*pols*/ * PKSUWL_SAMPLES_PER_PKT;
-  // Adjust for polarization
-  offset += (vdif_get_thread_id(vdifhdr) & 1);
-  // Update destination pointer
-  dst += offset;
+  // TODO
+  //// Compute starting packet offset into data block
+  //off_t offset = (off_t)(packet_idx % PKSUWL_PKTIDX_PER_BLOCK);
+  //// Convert to sample (i.e. uint32_t) offset
+  //offset *= 2 /*pols*/ * PKSUWL_SAMPLES_PER_PKT;
+  //// Adjust for polarization
+  //offset += (vdif_get_thread_id(vdifhdr) & 1);
+  //// Update destination pointer
+  //dst += offset;
 
-  // Copy samples
-  for(i=0 ; i<PKSUWL_SAMPLES_PER_PKT; i++) {
-    // Invert the MSb's of each component to convert to two's complement
-    *dst++ = *src++ ^ 0x80008000;
-    dst++; // Extra increment to interleave pols
+  // Copy samples.
+  // For now assume that packets are hntime aligned within heap.
+  for(i=0 ; i<p_oi->hnchan; i++) {
+    memcpy(dst, src, 4 * p_oi->hntime);
+    src += 4 * p_oi->hntime;
+    dst += 4 * mk_ntime(BLOCK_DATA_SIZE, *p_oi);
   }
 }
 
@@ -360,7 +352,7 @@ struct net_params {
 static int init(hashpipe_thread_args_t *args)
 {
   // Non-network essential paramaters
-  int blocsize=PKSUWL_BLOCK_DATA_SIZE;
+  int blocsize=BLOCK_DATA_SIZE;
   int directio=1;
   int nbits=16;
   int npol=4;
@@ -404,7 +396,7 @@ static int init(hashpipe_thread_args_t *args)
 
   // Set defaults
   strcpy(net_params->ifname, "eth4");
-  net_params->port = 12345;
+  net_params->port = 7148;
 
   hashpipe_status_t st = args->st;
 
@@ -419,7 +411,7 @@ static int init(hashpipe_thread_args_t *args)
     hgeti4(st.buf, "NPOL", &npol);
     hgetr8(st.buf, "OBSFERQ", &obsfreq);
     hgetr8(st.buf, "OBSBW", &obsbw);
-    //hgeti4(st.buf, "OBSNCHAN", &obsnchan); // Force to 1 for UWL
+    hgeti4(st.buf, "OBSNCHAN", &obsnchan);
     hgeti4(st.buf, "OVERLAP", &overlap);
     hgets(st.buf, "OBS_MODE", 80, obs_mode);
     hgets(st.buf, "DESTIP", 80, dest_ip);
@@ -436,10 +428,10 @@ static int init(hashpipe_thread_args_t *args)
     hputi4(st.buf, "NBITS", nbits);
     hputi4(st.buf, "NPOL", npol);
     hputr8(st.buf, "OBSBW", obsbw);
-    hputi4(st.buf, "OBSNCHAN", obsnchan); // Force to 1 for UWL
+    hputi4(st.buf, "OBSNCHAN", obsnchan); // TODO Calc from obs info
     hputi4(st.buf, "OVERLAP", overlap);
-    // Force PKTFMT to be "VDIF"
-    hputs(st.buf, "PKTFMT", "VDIF");
+    // Force PKTFMT to be "SPEAD"
+    hputs(st.buf, "PKTFMT", "SPEAD");
     hputr8(st.buf, "TBIN", tbin);
     hputs(st.buf, "OBS_MODE", obs_mode);
     hputs(st.buf, "DESTIP", dest_ip);
@@ -559,7 +551,7 @@ static void * run(hashpipe_thread_args_t * args)
   //uint64_t nextblock_seq_num=0;
   uint64_t dwell_blocks = 0;
   double dwell_seconds = 300.0;
-  double tbin = 1.0/PKSUWL_SAMPLES_PER_SEC;
+  double tbin = 1.0; //TODO /PKSUWL_SAMPLES_PER_SEC;
 
   // Heartbeat variables
   time_t lasttime = 0;
@@ -581,7 +573,20 @@ static void * run(hashpipe_thread_args_t * args)
   unsigned int pspkts = 0;
   unsigned int psdrps = 0;
 #endif // USE_IBVERBS
-  struct vdifhdr * vdifhdr;
+  struct udppkt * p_udppkt;
+  uint8_t * p_spead_payload;
+
+  // Structure to hold observation info, init all fields to invalid values
+  struct mk_obs_info obs_info;
+  mk_obs_info_init(&obs_info);
+
+  // PKTIDX per block (depends on obs_info).  Init to 0 to cause div-by-zero
+  // error if using it unintialized (crash early, crash hard!).
+  // TODO Store in status buffer?
+  uint32_t pktidx_per_block = 0;
+
+  // Structure to hold feng spead info from packet
+  struct mk_feng_spead_info feng_spead_info;
 
   // Variables for tracking timing stats
   struct timespec ts_start_recv, ts_stop_recv;
@@ -596,9 +601,34 @@ static void * run(hashpipe_thread_args_t * args)
 
   // Initialize working blocks
   for(wblk_idx=0; wblk_idx<2; wblk_idx++) {
-    init_block_info(wblk+wblk_idx, db, wblk_idx, wblk_idx);
+    init_block_info(wblk+wblk_idx, db, wblk_idx, wblk_idx, 0);
     wait_for_block_free(wblk+wblk_idx, &st, status_key);
   }
+
+  // Get any obs info from status buffer, store values
+  hashpipe_status_lock_safe(&st);
+  {
+    // Read (no change if not present)
+    hgetu4(st.buf, "FENCHAN", &obs_info.fenchan);
+    hgetu4(st.buf, "NANTS",   &obs_info.nants);
+    hgetu4(st.buf, "NSTRM",   &obs_info.nstrm);
+    hgetu4(st.buf, "HNTIME",  &obs_info.hntime);
+    hgetu4(st.buf, "HNCHAN",  &obs_info.hnchan);
+    hgetu8(st.buf, "HCLOCKS", &obs_info.hclocks);
+    hgeti4(st.buf, "SCHAN",   &obs_info.schan);
+    // Write (store default/invlid values if not present)
+    hputu4(st.buf, "FENCHAN", obs_info.fenchan);
+    hputu4(st.buf, "NANTS",   obs_info.nants);
+    hputu4(st.buf, "NSTRM",   obs_info.nstrm);
+    hputu4(st.buf, "HNTIME",  obs_info.hntime);
+    hputu4(st.buf, "HNCHAN",  obs_info.hnchan);
+    hputu8(st.buf, "HCLOCKS", obs_info.hclocks);
+    hputi4(st.buf, "SCHAN",   obs_info.schan);
+  }
+  hashpipe_status_unlock_safe(&st);
+
+  // Update pktidx_per_block
+  pktidx_per_block = mk_pktidx_per_block(BLOCK_DATA_SIZE, obs_info);
 
 #ifdef USE_IBVERBS
   // Set up ibverbs context
@@ -665,12 +695,22 @@ static void * run(hashpipe_thread_args_t * args)
         timestr[strlen(timestr)-1] = '\0'; // Chop off trailing newline
       }
 
-      // Check dest_ip/port in status buffer and, if needed, update DAQPULSE
+      // Check dest_ip/port in status buffer, get obs info parameters, and, if
+      // needed, update DAQPULSE
       hashpipe_status_lock_safe(&st);
       {
         // Get DESTIP address and BINDPORT (a historical misnomer for DESTPORT)
         hgets(st.buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
         hgeti4(st.buf,  "BINDPORT", &net_params->port);
+        
+        hgetu4(st.buf, "FENCHAN", &obs_info.fenchan);
+        hgetu4(st.buf, "NANTS",   &obs_info.nants);
+        hgetu4(st.buf, "NSTRM",   &obs_info.nstrm);
+        hgetu4(st.buf, "HNTIME",  &obs_info.hntime);
+        hgetu4(st.buf, "HNCHAN",  &obs_info.hnchan);
+        hgetu8(st.buf, "HCLOCKS", &obs_info.hclocks);
+        hgeti4(st.buf, "SCHAN",   &obs_info.schan);
+
         if(curtime != lasttime) {
           lasttime = curtime;
           hputs(st.buf,  "DAQPULSE", timestr);
@@ -678,10 +718,17 @@ static void * run(hashpipe_thread_args_t * args)
       }
       hashpipe_status_unlock_safe(&st);
 
-      // If DESTIP is valid and non-zero, start listening!  Valid here just
-      // means that it parses OK via inet_aton, not that it is correct and
-      // actually usable.
-      if(inet_aton(dest_ip_str, &dest_ip) && dest_ip.s_addr != INADDR_ANY) {
+      // TODO Parse the A.B.C.D+N notation
+      // If obs_info is valid and DESTIP is valid and non-zero, start
+      // listening!  Valid here just means that it parses OK via inet_aton, not
+      // that it is correct and actually usable.
+      if(mk_obs_info_valid(obs_info) &&
+          inet_aton(dest_ip_str, &dest_ip) &&
+          dest_ip.s_addr != INADDR_ANY) {
+
+        // Update pktidx_per_block
+        pktidx_per_block = mk_pktidx_per_block(BLOCK_DATA_SIZE, obs_info);
+
 #ifdef USE_IBVERBS
         // Add flow and change state to listen
         if(hashpipe_ibv_flow(hibv_ctx, 0, IBV_FLOW_SPEC_UDP,
@@ -803,11 +850,23 @@ static void * run(hashpipe_thread_args_t * args)
           // Switch to IDLE state (and ensure waiting flag is clear)
           state = IDLE;
           waiting = 0;
-          // Update DAQSTATE and status_key
+          // Re-init obs_info and pktidx_per_block to invalid values
+          mk_obs_info_init(&obs_info);
+          pktidx_per_block = 0;
+
+          // Update DAQSTATE, status_key, and obs_info params
           hashpipe_status_lock_safe(&st);
           {
             hputs(st.buf, "DAQSTATE", "IDLE");
             hputs(st.buf, status_key, "idle");
+            // These must be reset to valid values by external actor 
+            hputu4(st.buf, "FENCHAN", obs_info.fenchan);
+            hputu4(st.buf, "NANTS",   obs_info.nants);
+            hputu4(st.buf, "NSTRM",   obs_info.nstrm);
+            hputu4(st.buf, "HNTIME",  obs_info.hntime);
+            hputu4(st.buf, "HNCHAN",  obs_info.hnchan);
+            hputu8(st.buf, "HCLOCKS", obs_info.hclocks);
+            hputi4(st.buf, "SCHAN",   obs_info.schan);
           }
           hashpipe_status_unlock_safe(&st);
         }
@@ -868,30 +927,34 @@ static void * run(hashpipe_thread_args_t * args)
     for(curr_rpkt = hibv_rpkt; curr_rpkt;
         //curr_rpkt = (struct hashpipe_ibv_recv_pkt *)curr_rpkt->wr.next) {
         curr_rpkt = (struct hashpipe_ibv_recv_pkt *)(((struct ibv_recv_wr *)curr_rpkt)->next)) {
-      // Get pointer to vdifhdr
-      vdifhdr = vdif_hdr_from_eth((void *)curr_rpkt->wr.sg_list->addr);
+      // Get pointer to packet data
+      p_udppkt = (struct udppkt *)curr_rpkt->wr.sg_list->addr;
 #else
       // Get pointer to vdifhdr
-      vdifhdr = (struct vdifhdr *)(PKT_UDP_DATA(p_frame));
+      p_udppkt = (struct udppkt *)(PKT_MAC(p_frame));
 #endif // USE_IBVERBS
+
+      // TODO Validate that this is a valid packet for us!
+
+      // Parse packet
+      p_spead_payload = mk_parse_mkfeng_packet(p_udppkt, &feng_spead_info);
 
       // Count packet
       packet_count++;
 
       // Get packet index and absolute block number for packet
-      pkt_seq_num = meerkat_get_pktidx(vdifhdr);
-      pkt_blk_num = pkt_seq_num / PKSUWL_PKTIDX_PER_BLOCK;
+      pkt_seq_num = mk_pktidx(obs_info, feng_spead_info);
+      pkt_blk_num = pkt_seq_num / pktidx_per_block;
 
-      // We update the status buffer at the start of each block (pol 0)
+      // We update the status buffer at the start of each block
       // Also read PKTSTART, DWELL to calculate start/stop seq numbers.
-      if(pkt_seq_num % PKSUWL_PKTIDX_PER_BLOCK == 0
-          && vdif_get_thread_id(vdifhdr) == 0) {
+      if(pkt_seq_num % pktidx_per_block == 0) {
         hashpipe_status_lock_safe(&st);
         {
           hputi8(st.buf, "PKTIDX", pkt_seq_num);
           hputi8(st.buf, "PKTBLK", pkt_blk_num); // TODO do we want/need this?
           hgetu8(st.buf, "PKTSTART", &start_seq_num);
-          start_seq_num -= start_seq_num % PKSUWL_PKTIDX_PER_BLOCK;
+          start_seq_num -= start_seq_num % pktidx_per_block;
           hputu8(st.buf, "PKTSTART", start_seq_num);
           hgetr8(st.buf, "DWELL", &dwell_seconds);
           hputr8(st.buf, "DWELL", dwell_seconds); // In case it wasn't there
@@ -903,10 +966,9 @@ static void * run(hashpipe_thread_args_t * args)
           //     tbin * ntime/block
           //
           // To get an integer number of blocks, simply truncate
-          dwell_blocks = trunc(dwell_seconds
-              / (tbin * PKSUWL_SAMPLES_PER_PKT * PKSUWL_PKTIDX_PER_BLOCK));
+          dwell_blocks = trunc(dwell_seconds / (tbin * mk_ntime(BLOCK_DATA_SIZE, obs_info)));
 
-          stop_seq_num = start_seq_num + PKSUWL_PKTIDX_PER_BLOCK * dwell_blocks;
+          stop_seq_num = start_seq_num + pktidx_per_block * dwell_blocks;
           hputi8(st.buf, "PKTSTOP", stop_seq_num);
 
           hgetu8(st.buf, "NDROP", &u64tmp);
@@ -945,10 +1007,6 @@ static void * run(hashpipe_thread_args_t * args)
         finalize_block(wblk);
         // Update ndrop counter
         ndrop_total += wblk->ndrop;
-        if(wblk->ndrop >= PKSUWL_PKTIDX_PER_BLOCK) {
-          // Assume one entire polrization is missing
-          ndrop_total -= PKSUWL_PKTIDX_PER_BLOCK;
-        }
         // Shift working blocks
         wblk[0] = wblk[1];
         // Increment last working block
@@ -964,9 +1022,10 @@ static void * run(hashpipe_thread_args_t * args)
         // Re-init working blocks for next block number
         // and clear their data buffers
         for(wblk_idx=0; wblk_idx<2; wblk_idx++) {
-          init_block_info(wblk+wblk_idx, NULL, -1, pkt_blk_num+wblk_idx+1);
+          init_block_info(wblk+wblk_idx, NULL, -1, pkt_blk_num+wblk_idx+1,
+              feng_spead_info.payload_size);
           // Clear data buffer
-          memset(block_info_data(wblk+wblk_idx), 0, PKSUWL_BLOCK_DATA_SIZE);
+          memset(block_info_data(wblk+wblk_idx), 0, BLOCK_DATA_SIZE);
         }
 #if 0
 // This happens after discontinuities (e.g. on startup), so don't warn about
@@ -993,10 +1052,17 @@ static void * run(hashpipe_thread_args_t * args)
       // Only copy packet data and count packet if its wblk_idx is valid
       if(0 <= wblk_idx && wblk_idx < 2) {
         // Copy packet data to data buffer of working block
-        copy_packet_data_to_databuf(pkt_seq_num, wblk+wblk_idx, vdifhdr);
+        copy_packet_data_to_databuf(wblk+wblk_idx,
+            &obs_info, &feng_spead_info, p_spead_payload);
 
         // Count packet for block
         wblk[wblk_idx].npacket++;
+
+        // Update block's packets per block.  Not needed for each packet, but
+        // probably just as fast to do it for each packet rather than
+        // check-and-update-only-if-needed for each packet.
+        wblk[wblk_idx].pkts_per_block = BLOCK_DATA_SIZE / feng_spead_info.payload_size;
+        wblk[wblk_idx].pktidx_per_block = pktidx_per_block;
       }
 
 #ifdef USE_IBVERBS

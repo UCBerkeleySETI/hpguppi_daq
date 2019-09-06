@@ -12,6 +12,7 @@ hpguppi_databuf = hpguppi_databuf.h \
 
 hpguppi_support = hpguppi_params.h \
 		  hpguppi_params.c \
+		  hpguppi_mkfeng.h \
 		  hpguppi_pksuwl.h \
 		  hpguppi_time.h   \
 		  hpguppi_time.c   \
@@ -26,6 +27,7 @@ libsla_support = slalib.h sla.c f77.h
 hpguppi_threads = hpguppi_net_thread.c     \
 		  hpguppi_mb1_net_thread.c \
 		  hpguppi_mb128ch_net_thread.c \
+		  hpguppi_meerkat_net_thread.c  \
 		  hpguppi_pksuwl_net_thread.c  \
 		  hpguppi_rawdisk_thread.c
 
