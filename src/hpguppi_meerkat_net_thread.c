@@ -366,6 +366,7 @@ static int init(hashpipe_thread_args_t *args)
   char fifo_name[PATH_MAX];
   struct net_params * net_params;
   const char * status_key = args->thread_desc->skey;
+char *pchar;
 
   // Create control FIFO (/tmp/hpguppi_daq_control/$inst_id)
   int rv = mkdir(HPGUPPI_DAQ_CONTROL, 0777);
@@ -415,6 +416,7 @@ static int init(hashpipe_thread_args_t *args)
     hgeti4(st.buf, "OVERLAP", &overlap);
     hgets(st.buf, "OBS_MODE", 80, obs_mode);
     hgets(st.buf, "DESTIP", 80, dest_ip);
+if((pchar = strchr(dest_ip, '+'))) *pchar = '\0';
 
     // Calculate TBIN from OBSNCHAN and OBSBW
     tbin = fabs(obsnchan / obsbw) / 1e6;
@@ -701,6 +703,7 @@ static void * run(hashpipe_thread_args_t * args)
       {
         // Get DESTIP address and BINDPORT (a historical misnomer for DESTPORT)
         hgets(st.buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
+if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
         hgeti4(st.buf,  "BINDPORT", &net_params->port);
         
         hgetu4(st.buf, "FENCHAN", &obs_info.fenchan);
@@ -820,6 +823,7 @@ static void * run(hashpipe_thread_args_t * args)
 
           // Get DESTIP to see if we should go to IDLE state
           hgets(st.buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
+if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
         }
         hashpipe_status_unlock_safe(&st);
 
