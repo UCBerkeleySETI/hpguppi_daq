@@ -35,3 +35,4 @@ sleep 1
 
 hashpipe_check_status -k NDROP -i 0
 
+hashpipe_redis_gateway.rb -D bluse -g `hostname -s` -i 0
