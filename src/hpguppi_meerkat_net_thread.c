@@ -705,7 +705,7 @@ static void * run(hashpipe_thread_args_t * args)
         hgets(st.buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
 if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
         hgeti4(st.buf,  "BINDPORT", &net_params->port);
-        
+
         hgetu4(st.buf, "FENCHAN", &obs_info.fenchan);
         hgetu4(st.buf, "NANTS",   &obs_info.nants);
         hgetu4(st.buf, "NSTRM",   &obs_info.nstrm);
@@ -863,7 +863,7 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
           {
             hputs(st.buf, "DAQSTATE", "IDLE");
             hputs(st.buf, status_key, "idle");
-            // These must be reset to valid values by external actor 
+            // These must be reset to valid values by external actor
             hputu4(st.buf, "FENCHAN", obs_info.fenchan);
             hputu4(st.buf, "NANTS",   obs_info.nants);
             hputu4(st.buf, "NSTRM",   obs_info.nstrm);
