@@ -926,6 +926,8 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &ts_start_proc);
 
+// IBVERBS can return multiple packets, so we need to loop over all of them.
+// PKTSOCK only returns one frame at a time, so no looping needed.
 #ifdef USE_IBVERBS
     // For each packet: process all packets
     for(curr_rpkt = hibv_rpkt; curr_rpkt;
@@ -934,7 +936,7 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
       // Get pointer to packet data
       p_udppkt = (struct udppkt *)curr_rpkt->wr.sg_list->addr;
 #else
-      // Get pointer to vdifhdr
+      // Get pointer to ethernet frame
       p_udppkt = (struct udppkt *)(PKT_MAC(p_frame));
 #endif // USE_IBVERBS
 
