@@ -472,6 +472,7 @@ if((pchar = strchr(dest_ip, '+'))) *pchar = '\0';
 
 static void * run(hashpipe_thread_args_t * args)
 {
+int debug_i=0, debug_j=0;
   // Local aliases to shorten access to args fields
   // Our output buffer happens to be a hpguppi_input_databuf
   hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->obuf;
@@ -950,6 +951,14 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
 #endif // USE_IBVERBS
 
       // TODO Validate that this is a valid packet for us!
+for(debug_i=0; debug_i<8; debug_i++) {
+  printf("%04x:", 16*debug_i);
+  for(debug_j=0; debug_j<16; debug_j++) {
+    printf(" %02x", ((uint8_t *)p_udppkt)[16*debug_i+debug_j]);
+  }
+  printf("\n");
+}
+return(NULL);
 
       // Parse packet
       p_spead_payload = mk_parse_mkfeng_packet(p_udppkt, &feng_spead_info);
