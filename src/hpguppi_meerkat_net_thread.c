@@ -543,8 +543,8 @@ static void * run(hashpipe_thread_args_t * args)
   int wblk_idx;
 
   // Packet block variables
-  uint64_t pkt_seq_num;
-  uint64_t pkt_blk_num;
+  uint64_t pkt_seq_num = 0;
+  uint64_t pkt_blk_num = 0;
   uint64_t start_seq_num=0;
   uint64_t stop_seq_num=0;
   uint64_t status_seq_num;
@@ -575,7 +575,7 @@ static void * run(hashpipe_thread_args_t * args)
   unsigned int psdrps = 0;
 #endif // USE_IBVERBS
   struct udppkt * p_udppkt;
-  uint8_t * p_spead_payload;
+  uint8_t * p_spead_payload = NULL;
 
   // Structure to hold observation info, init all fields to invalid values
   struct mk_obs_info obs_info;
@@ -591,7 +591,7 @@ static void * run(hashpipe_thread_args_t * args)
   int32_t eff_block_size;
 
   // Structure to hold feng spead info from packet
-  struct mk_feng_spead_info feng_spead_info;
+  struct mk_feng_spead_info feng_spead_info = {0};
 
   // Variables for tracking timing stats
   struct timespec ts_start_recv, ts_stop_recv;
