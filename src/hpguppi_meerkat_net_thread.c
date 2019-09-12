@@ -176,7 +176,7 @@ static void reset_block_info_stats(struct block_info *bi)
 // bi->pkts_per_block is set of pkt_size > 0.
 static void init_block_info(struct block_info *bi,
     struct hpguppi_input_databuf *db, int block_idx, uint64_t block_num,
-    uint64_t pkt_size)
+    uint64_t pkts_per_block)
 {
   if(db) {
     bi->db = db;
@@ -185,10 +185,8 @@ static void init_block_info(struct block_info *bi,
     bi->block_idx = block_idx;
   }
   bi->block_num = block_num;
-  // Must be set later
-  bi->pktidx_per_block = 0;
-  if(pkt_size > 0) {
-    bi->pkts_per_block = BLOCK_DATA_SIZE / pkt_size;
+  if(pkts_per_block > 0) {
+    bi->pkts_per_block = pkts_per_block;
   }
   reset_block_info_stats(bi);
 }
@@ -549,6 +547,7 @@ static void * run(hashpipe_thread_args_t * args)
   uint64_t pkt_blk_num;
   uint64_t start_seq_num=0;
   uint64_t stop_seq_num=0;
+  uint64_t status_seq_num;
   //uint64_t last_seq_num=2048;
   //uint64_t nextblock_seq_num=0;
   uint64_t dwell_blocks = 0;
@@ -584,8 +583,12 @@ static void * run(hashpipe_thread_args_t * args)
 
   // PKTIDX per block (depends on obs_info).  Init to 0 to cause div-by-zero
   // error if using it unintialized (crash early, crash hard!).
-  // TODO Store in status buffer?
+  // TODO Store in status buffer using PIPERBLK
   uint32_t pktidx_per_block = 0;
+  // Effective block size (will be less than BLOCK_DATA_SIZE when
+  // BLOCK_DATA_SIZE is not divisible by NCHAN and/or HNTIME.
+  // Historically, BLOCSIZE gets stored as a signed 4 byte integer
+  int32_t eff_block_size;
 
   // Structure to hold feng spead info from packet
   struct mk_feng_spead_info feng_spead_info;
@@ -629,8 +632,11 @@ static void * run(hashpipe_thread_args_t * args)
   }
   hashpipe_status_unlock_safe(&st);
 
-  // Update pktidx_per_block
-  pktidx_per_block = mk_pktidx_per_block(BLOCK_DATA_SIZE, obs_info);
+  if(mk_obs_info_valid(obs_info)) {
+    // Update pktidx_per_block and eff_block_size
+    pktidx_per_block = mk_pktidx_per_block(BLOCK_DATA_SIZE, obs_info);
+    eff_block_size = mk_block_size(BLOCK_DATA_SIZE, obs_info);
+  }
 
 #ifdef USE_IBVERBS
   // Set up ibverbs context
@@ -729,8 +735,9 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
           inet_aton(dest_ip_str, &dest_ip) &&
           dest_ip.s_addr != INADDR_ANY) {
 
-        // Update pktidx_per_block
+        // Update pktidx_per_block and eff_block_size
         pktidx_per_block = mk_pktidx_per_block(BLOCK_DATA_SIZE, obs_info);
+        eff_block_size = mk_block_size(BLOCK_DATA_SIZE, obs_info);
 
 #ifdef USE_IBVERBS
         // Add flow and change state to listen
@@ -854,9 +861,11 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
           // Switch to IDLE state (and ensure waiting flag is clear)
           state = IDLE;
           waiting = 0;
-          // Re-init obs_info and pktidx_per_block to invalid values
+          // Re-init obs_info, pktidx_per_block, and eff_block_size to invalid
+          // values
           mk_obs_info_init(&obs_info);
           pktidx_per_block = 0;
+          eff_block_size = 0;
 
           // Update DAQSTATE, status_key, and obs_info params
           hashpipe_status_lock_safe(&st);
@@ -954,11 +963,14 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
 
       // We update the status buffer at the start of each block
       // Also read PKTSTART, DWELL to calculate start/stop seq numbers.
-      if(pkt_seq_num % pktidx_per_block == 0) {
+      if(pkt_seq_num % pktidx_per_block == 0
+          && pkt_seq_num != status_seq_num) {
+        status_seq_num  = pkt_seq_num;
         hashpipe_status_lock_safe(&st);
         {
           hputi8(st.buf, "PKTIDX", pkt_seq_num);
           hputi8(st.buf, "PKTBLK", pkt_blk_num); // TODO do we want/need this?
+          hputi4(st.buf, "BLOCSIZE", eff_block_size);
           hgetu8(st.buf, "PKTSTART", &start_seq_num);
           start_seq_num -= start_seq_num % pktidx_per_block;
           hputu8(st.buf, "PKTSTART", start_seq_num);
@@ -1029,9 +1041,9 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
         // and clear their data buffers
         for(wblk_idx=0; wblk_idx<2; wblk_idx++) {
           init_block_info(wblk+wblk_idx, NULL, -1, pkt_blk_num+wblk_idx+1,
-              feng_spead_info.payload_size);
+              eff_block_size / feng_spead_info.payload_size);
           // Clear data buffer
-          memset(block_info_data(wblk+wblk_idx), 0, BLOCK_DATA_SIZE);
+          memset(block_info_data(wblk+wblk_idx), 0, eff_block_size);
         }
 #if 0
 // This happens after discontinuities (e.g. on startup), so don't warn about

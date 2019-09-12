@@ -258,8 +258,17 @@ mk_block_chan(const struct mk_obs_info oi, const struct mk_feng_spead_info fesi)
       oi.hnchan, fesi.feng_chan, oi.schan);
 }
 
-// Calculate the number of pktidx values per block.
-// Assumes sample size is 4 bytes.
+// Calculate the number of pktidx values per block.  Note that nchan is the
+// total number of channels across all F engines.  Each PKTIDX corresponds to a
+// set of heaps that all share a common timestamp. It is possible that the
+// number of PKTIDX values per block (i.e. heap sets per block) times the
+// number of time samples per heap will not divide the data block size evenly
+// (e.g. when NANTS is not a power of two).  This means that some trailing
+// bytes in the data buffer will be unoccupied.  These unoccupied bytes should
+// not be processed (e.g. copied to output files) so it is important to update
+// the BLOCSIZE field in the status buffer accordingly whenever a new
+// pktidx_per_block value is calculated.
+// This function assumes each sample is 4 bytes ([1 real + 1 imag] * 2 pols).
 static inline
 uint32_t
 calc_mk_pktidx_per_block(size_t block_size, uint32_t nchan, uint32_t hntime)
@@ -275,21 +284,41 @@ mk_pktidx_per_block(size_t block_size, const struct mk_obs_info oi)
 }
 
 // For MeerKAT, the NTIME parameter (not stored in the status buffer or GUPPI
-// RAW files), represents the total number of time samples in a block.
-// It depends on the block size and NCHAN (and sample size, but that is assumed
-// to be 4 bytes).
+// RAW files), represents the total number of time samples in a block.  It
+// depends on the block size and NCHAN (and sample size, but that is assumed to
+// be 4 bytes).  This calculation is a bit tricky because the effective block
+// size can be less than the max block size when NCHAN and HNTIME do not evenly
+// divide the max block size.
 static inline
 uint32_t
-calc_mk_ntime(size_t block_size, uint32_t nchan)
+calc_mk_ntime(size_t block_size, uint32_t nchan, uint32_t hntime)
 {
-  return (uint32_t)(block_size / (4 * nchan));
+  return hntime * calc_mk_pktidx_per_block(block_size, nchan, hntime);
 }
 
 static inline
 uint32_t
 mk_ntime(size_t block_size, const struct mk_obs_info oi)
 {
-  return calc_mk_ntime(block_size, mk_nchan(oi));
+  return calc_mk_ntime(block_size, mk_nchan(oi), oi.hntime);
+}
+
+// Calculate the effective block size for the given max block size, nchan, and
+// hntime values.  The effective block size can be less than the max block size
+// if nchan and/or hntime do not evenly divide the max block size.  This
+// assumes 4 bytes per sample.
+static inline
+uint32_t
+calc_mk_block_size(size_t block_size, uint32_t nchan, uint32_t hntime)
+{
+  return 4 * nchan * hntime * calc_mk_pktidx_per_block(block_size, nchan, hntime);
+}
+
+static inline
+uint32_t
+mk_block_size(size_t block_size, const struct mk_obs_info oi)
+{
+  return calc_mk_block_size(block_size, mk_nchan(oi), oi.hntime);
 }
 
 // Parses a MeerKAT F Engine packet, stores metadata in fesi, returns pointer
