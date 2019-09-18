@@ -20,28 +20,46 @@
 // into SPEAD heaps.  Each packet specifies the size of the heap to which it
 // belongs, but for all(?) current MeerKAT F-Engines the heap size is 256 KiB.
 //
-// Each heap contains "heap_ntime" time samples for a given frequency channel
-// followed by heap_ntime time samples for the next frequency channel and so on
-// for all the channels of that heap's stream.  Each heap contains data from a
-// single F-Engine.
+// Each heap contains HNTIME samples of HNCHAN frequency channels from a single
+// F engine.  The coordinator will populate these value in the status buffer.
+// The samples in a heap are arranged in "time major" order, i.e. HNTIME
+// samples for a given frequency channel followed by HNTIME samples for the
+// next frequency channel and so on for all the channels of the heap.
 //
-// The number of channels per heap, "heap_nchan" is given by:
+// The number of channels per heap, HNCHAN, is related to the number of F
+// engine channels and streams:
 //
-//                   FENCHAN
-//     heap_nchan = ---------
-//                   FENSTRM
+//               FENCHAN
+//     HNCHAN = ---------
+//               FENSTRM
 //
 // In other words, the F-Engine channels are divided evenly across the
 // streams.
 //
-// The value of "heap_ntime" can be derived by:
+// The value of HNTIME is related to the heap size and HNCHAN:
 //
-//                   spead_payload_size
-//     heap_ntime = --------------------
-//                     4 * heap_nchan
+//               spead_heap_size
+//     HNTIME = -----------------
+//                 4 * HNCHAN
 //
-// The value for "spead_payload_size" comes from the SPEAD header of each
+// The value for "spead_heap_size" comes from the SPEAD header of each
 // packet.
+//
+// The spead_timestamp value for a given heap is given in the SPEAD header of
+// each packet.  These spead_timestamp values are ADC clock counts since the
+// F-Engine sync time.  The hpguppi_daq code uses the spead_timestamp value to
+// derive a related time value, known as PKTIDX, that increases by one for each
+// heap.  This is done by dividing the spead_timestamp value by "HCLOCKS" (the
+// number of ADC clock cycles per heap).  The value of HCLOCKS is provided by
+// the coordinator via the status buffer, but it can be calculated as:
+//
+//     HCLOCKS = 2 * FENCHAN * heap_ntime
+//
+// The value of PKTIDX can be calculated as:
+//
+//               spead_timestamp
+//     PKTIDX = -----------------
+//                   HCLOCKS
 //
 // For a given processing pipeline instance, the SPEAD heaps from all F-Engines
 // and streams that share a common spead_timestamp are referred to in this code
@@ -58,53 +76,68 @@
 //
 // The received heaps are assembled into GUPPI RAW data blocks in the network
 // thread's shared memory output data buffer.  To facilitate reuse of the
-// shared memory structures, the assembled block size is always 128 MiB.  The
-// number of unique spead_timestamp values that span a block is known as
-// "block_ntime" and depends on the size of each heapset.  The value of
-// block_ntime can be calculated as:
+// shared memory structures, the space for block assembly is always 128 MiB.
+// The heapset size may not evenly divide into the total block assembly buffer
+// size, but the maximum number of complete heapsets that fit within that limit
+// will go into each data block.  The BLOCSIZE parameter will be updated to
+// reflect the size of the occupied portion of the shared memory block.
 //
-//                    128 * 1024 * 1204
-//     block_ntime = -------------------
-//                      heapset_size
+// Because each heapset has a unique PKTIDX, the number of heapsets per block
+// is the same as the number of PKTIDX values per block. This value is stored
+// in the status buffer as "PIPERBLK" and is calculated (using integer
+// division) as:
 //
-// The spead_timestamp value for a given heap is given in the SPEAD header of
-// each packet.  These spead_timestamp values are ADC clock counts since the
-// F-Engine sync time.  The hpguppi_daq code uses the spead_timestamp value to
-// derive a related time value, known as PKTIDX, that increases by one for each
-// heap  (and heapset).  This is done by dividing the spead_timestamp value by
-// "adc_clocks_per_heap" (the number of ADC clock cycles per heap).  The value
-// of adc_clocks_per_heap can be calculated as:
+//                 128 * 1024 * 1204
+//     PIPERBLK = -------------------
+//                   heapset_size
 //
-//     adc_clocks_per_heap = 2 * FENCHAN * heap_ntime
+// Assuming an infinite number of data blocks, the "absolute" block index for a
+// given PKTIDX value is calculated (using integer division) as:
 //
-// The value of PKTIDX can then be calculated as:
+//                         PKTIDX
+//     abs_block_index = ----------
+//                        PIPERBLK
 //
-//                 spead_timestamp
-//     PKTIDX = ---------------------
-//               adc_clocks_per_heap
+//  But since the shared memory ring buffer has a limited number of blocks
+//  ("nblocks"), the physical block index used is calculated (using integer
+//  division) as:
 //
-// As described above, each GUPPI RAW data block contains block_ntime unique
-// spead_timestamp values.  Equivalently, each data block contains block_ntime
-// heapsets.  These block_ntime regions in the data buffer are referred to as
-// "time slots" and are indexed from 0 to block_ntime-1.  The time slot index
-// for a given PKTIDX is determined by simply by:
+//                          PKTIDX
+//     phys_block_index = ---------- mod nblocks
+//                         PIPERBLK
 //
-//     time_slot_idx = PKTIDX mod block_ntime
+// The PIPERBLK regions in the data buffer are referred to as "slots" and are
+// indexed from 0 to PIPERBLK-1.  The slot index for a given PKTIDX is
+// determined by:
 //
-// ## Data block arrangement
+//     slot_idx = PKTIDX mod PIPERBLK
+//
+// For example, assuming nblocks=3 and PIPERBLK=4, the heapset for PKTIDX=93
+// would go in abs_block_index=23, phys_block_index=2, slot_idx=1.
+//
+// ## Data arrangement within a block
 //
 // The data in a GUPPI RAW data block are arranged as a continuous time series
-// of (complex, dual-pol) samples for the first F-Engine's first channel,
-// followed by the samples for the first F-Engine's second channel, and so on
-// for all the channels of the first F-Engine.  This pattern is then repeated
-// for all the remaining F-Engines.  Thus, each consecutive set of "block_ntime
-// * heap_ntime" (complex, dual-pol) samples (or "4 * block_time * heap_time"
-// bytes) contains all the timesamples for a specific F-Engine and channel.
+// of (complex, dual-pol) samples for the first F-Engine's first stream's first
+// channel (also called the "start channel" and stored in the status buffer as
+// "SCHAN").  followed by the samples for the first F-Engine's first stream's
+// second channel, and so on for all the channels of the first F-Engine.  This
+// pattern is then repeated for all the remaining streams and F-Engines.  Thus,
+// each consecutive set of "PIPERBLK * HNTIME" complex, dual-pol samples (or "4
+// * PIPERBLK * HNTIME" bytes) contains all the time samples for a specific
+// F-Engine and channel.
 //
-// To put it another way, each time slot holds one heapset and is arranged as a
-// 2D region of memory with a row "width" of "4 * heap_ntime" bytes, a "height"
-// of "heap_nchan * NSTRM * NANTS" rows, and an inter-row "stride" of "4 *
-// block_time * heap_time" bytes.
+// To put it another way, each slot holds one heapset and is arranged as a
+// 2D region of memory with a row "width" of "4 * HNTIME" bytes, a "height"
+// of "HNCHAN * NSTRM * NANTS" rows, and an inter-row "stride" of "4 *
+// PIPERBLK * HNTIME" bytes.
+//
+// The total number of frequency channels in a block is stored in the status
+// buffer as OBSNCHAN and is calculated as:
+//
+//     OBSNCHAN = NANTS * NSTRM * HNCHAN
+//
+// This is NANTS sets of NSTRM * HNCHAN unique frequencies.
 //
 // ## Copying packet payloads into data block
 //
