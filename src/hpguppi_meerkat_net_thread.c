@@ -308,6 +308,7 @@ static void copy_packet_data_to_databuf(struct block_info *bi,
   // block_chan is the "row" in the data block where this packet's heap starts
   int block_chan = mk_block_chan(*p_oi, *p_fesi);
 
+#if 0
 printf("feng_id    = %lu\n", p_fesi->feng_id);
 printf("nstrm      = %d\n", p_oi->nstrm);
 printf("hnchan     = %d\n", p_oi->hnchan);
@@ -319,20 +320,27 @@ printf("ostride    = 0x%08lx\n", ostride);
 printf("slot_idx   = %d\n", slot_idx);
 printf("block_chan = %d\n", block_chan);
 printf("dst        = 0x%p\n", dst);
+#endif
 
   // Advance dst to start of slot
   dst += slot_idx * istride;
+#if 0
 printf("dst        = 0x%p\n", dst);
+#endif
 
   // Advance dst to start of heap
   dst += block_chan * ostride;
+#if 0
 printf("dst        = 0x%p\n", dst);
+#endif
 
   // Advance dst to heap offset.
   // For now assume that packets are hntime aligned within heap.
   dst += (p_fesi->heap_offset / istride) * ostride;
+#if 0
 printf("dst        = 0x%p\n", dst);
 printf("\n");
+#endif
 
   // Copy samples
   // TODO Ensure that bytes_to_copy is a multiple of istride.
@@ -503,7 +511,9 @@ if((pchar = strchr(dest_ip, '+'))) *pchar = '\0';
 
 static void * run(hashpipe_thread_args_t * args)
 {
+#if 0
 int debug_i=0, debug_j=0;
+#endif
   // Local aliases to shorten access to args fields
   // Our output buffer happens to be a hpguppi_input_databuf
   hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->obuf;
@@ -987,6 +997,7 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
 #endif // USE_IBVERBS
 
       // TODO Validate that this is a valid packet for us!
+#if 0
 for(debug_i=0; debug_i<8; debug_i++) {
   printf("%04x:", 16*debug_i);
   for(debug_j=0; debug_j<16; debug_j++) {
@@ -996,6 +1007,7 @@ for(debug_i=0; debug_i<8; debug_i++) {
 }
 printf("\n");
 fflush(stdout);
+#endif
 
       // Parse packet
       p_spead_payload = mk_parse_mkfeng_packet(p_udppkt, &feng_spead_info);
@@ -1007,6 +1019,7 @@ fflush(stdout);
       pkt_seq_num = mk_pktidx(obs_info, feng_spead_info);
       pkt_blk_num = pkt_seq_num / pktidx_per_block;
 
+#if 0
 printf("pkt_seq_num = %lu\n", pkt_seq_num);
 printf("pkt_blk_num = %lu\n", pkt_blk_num);
 printf("heap_counter = 0x%016lx\n", feng_spead_info.heap_counter);
@@ -1017,6 +1030,7 @@ printf("timestamp    = 0x%016lx\n", feng_spead_info.timestamp   );
 printf("feng_id      = 0x%016lx\n", feng_spead_info.feng_id     );
 printf("feng_chan    = 0x%016lx\n", feng_spead_info.feng_chan   );
 printf("\n");
+#endif
 
       // We update the status buffer at the start of each block
       // Also read PKTSTART, DWELL to calculate start/stop seq numbers.
@@ -1078,7 +1092,9 @@ printf("\n");
 
       // Manage blocks based on pkt_blk_num
       if(pkt_blk_num == wblk[1].block_num + 1) {
+#if 0
 printf("next block (%ld == %ld + 1)\n", pkt_blk_num, wblk[1].block_num);
+#endif
         // Finalize first working block
         finalize_block(wblk);
         // Update ndrop counter
@@ -1091,7 +1107,9 @@ printf("next block (%ld == %ld + 1)\n", pkt_blk_num, wblk[1].block_num);
         wait_for_block_free(&wblk[1], &st, status_key);
       } else if(pkt_blk_num < wblk[0].block_num - 1
       || pkt_blk_num > wblk[1].block_num + 1) {
+#if 0
 printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_num, wblk[1].block_num);
+#endif
         // Should only happen when transitioning into LISTEN, so warn about it
         hashpipe_warn("hpguppi_meerkat_net_thread",
             "working blocks reinit due to packet discontinuity (PKTIDX %lu)",
@@ -1118,9 +1136,12 @@ printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_
             pkt_seq_num);
 #endif
       }
-printf("packet block: %ld   working blocks: %ld %lu\n", pkt_blk_num, wblk[0].block_num, wblk[1].block_num);
 
-      // TODO Check START/STOP status
+#if 0
+printf("packet block: %ld   working blocks: %ld %lu\n", pkt_blk_num, wblk[0].block_num, wblk[1].block_num);
+#endif
+
+      // TODO Check START/STOP status???
 
       // Once we get here, compute the index of the working block corresponding
       // to this packet.  The computed index may not correspond to a valid
