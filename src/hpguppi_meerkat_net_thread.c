@@ -637,6 +637,14 @@ int debug_i=0, debug_j=0;
     hgetu4(st.buf, "HNCHAN",  &obs_info.hnchan);
     hgetu8(st.buf, "HCLOCKS", &obs_info.hclocks);
     hgeti4(st.buf, "SCHAN",   &obs_info.schan);
+
+    // If obs_info is valid
+    if(mk_obs_info_valid(obs_info)) {
+      // Update pktidx_per_block and eff_block_size
+      pktidx_per_block = mk_pktidx_per_block(BLOCK_DATA_SIZE, obs_info);
+      eff_block_size = mk_block_size(BLOCK_DATA_SIZE, obs_info);
+    }
+
     // Write (store default/invlid values if not present)
     hputu4(st.buf, "FENCHAN", obs_info.fenchan);
     hputu4(st.buf, "NANTS",   obs_info.nants);
@@ -645,14 +653,11 @@ int debug_i=0, debug_j=0;
     hputu4(st.buf, "HNCHAN",  obs_info.hnchan);
     hputu8(st.buf, "HCLOCKS", obs_info.hclocks);
     hputi4(st.buf, "SCHAN",   obs_info.schan);
+
+    hputu4(st.buf, "PIPERBLK", pktidx_per_block);
+    hputi4(st.buf, "BLOCSIZE", eff_block_size);
   }
   hashpipe_status_unlock_safe(&st);
-
-  if(mk_obs_info_valid(obs_info)) {
-    // Update pktidx_per_block and eff_block_size
-    pktidx_per_block = mk_pktidx_per_block(BLOCK_DATA_SIZE, obs_info);
-    eff_block_size = mk_block_size(BLOCK_DATA_SIZE, obs_info);
-  }
 
 #ifdef USE_IBVERBS
   // Set up ibverbs context
