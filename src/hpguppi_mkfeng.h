@@ -231,7 +231,7 @@ static inline
 uint32_t
 spead_id(uint64_t item)
 {
-  return (item >> 48);
+  return ((item >> 48) & 0xffff);
 }
 
 static inline
