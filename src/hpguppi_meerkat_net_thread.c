@@ -308,16 +308,32 @@ static void copy_packet_data_to_databuf(struct block_info *bi,
   // block_chan is the "row" in the data block where this packet's heap starts
   int block_chan = mk_block_chan(*p_oi, *p_fesi);
 
+printf("feng_id    = %lu\n", p_fesi->feng_id);
+printf("nstrm      = %d\n", p_oi->nstrm);
+printf("hnchan     = %d\n", p_oi->hnchan);
+printf("feng_chan  = %lu\n", p_fesi->feng_chan);
+printf("schan      = %d\n", p_oi->schan);
+printf("b_to_copy  = %d\n", bytes_to_copy);
+printf("istride    = 0x%08lx\n", istride);
+printf("ostride    = 0x%08lx\n", ostride);
+printf("slot_idx   = %d\n", slot_idx);
+printf("block_chan = %d\n", block_chan);
+printf("dst        = 0x%p\n", dst);
+
   // Advance dst to start of slot
   dst += slot_idx * istride;
+printf("dst        = 0x%p\n", dst);
 
   // Advance dst to start of heap
   dst += block_chan * ostride;
+printf("dst        = 0x%p\n", dst);
 
   // Advance dst to heap offset.
   // For now assume that packets are hntime aligned within heap.
   dst += (p_fesi->heap_offset / istride) * ostride;
- 
+printf("dst        = 0x%p\n", dst);
+printf("\n");
+
   // Copy samples
   // TODO Ensure that bytes_to_copy is a multiple of istride.
   while(bytes_to_copy > 0) {
@@ -978,7 +994,8 @@ for(debug_i=0; debug_i<8; debug_i++) {
   }
   printf("\n");
 }
-return(NULL);
+printf("\n");
+fflush(stdout);
 
       // Parse packet
       p_spead_payload = mk_parse_mkfeng_packet(p_udppkt, &feng_spead_info);
@@ -989,6 +1006,17 @@ return(NULL);
       // Get packet index and absolute block number for packet
       pkt_seq_num = mk_pktidx(obs_info, feng_spead_info);
       pkt_blk_num = pkt_seq_num / pktidx_per_block;
+
+printf("pkt_seq_num = %lu\n", pkt_seq_num);
+printf("pkt_blk_num = %lu\n", pkt_blk_num);
+printf("heap_counter = 0x%016lx\n", feng_spead_info.heap_counter);
+printf("heap_size    = 0x%016lx\n", feng_spead_info.heap_size   );
+printf("heap_offset  = 0x%016lx\n", feng_spead_info.heap_offset );
+printf("payload_size = 0x%016lx\n", feng_spead_info.payload_size);
+printf("timestamp    = 0x%016lx\n", feng_spead_info.timestamp   );
+printf("feng_id      = 0x%016lx\n", feng_spead_info.feng_id     );
+printf("feng_chan    = 0x%016lx\n", feng_spead_info.feng_chan   );
+printf("\n");
 
       // We update the status buffer at the start of each block
       // Also read PKTSTART, DWELL to calculate start/stop seq numbers.
@@ -1050,6 +1078,7 @@ return(NULL);
 
       // Manage blocks based on pkt_blk_num
       if(pkt_blk_num == wblk[1].block_num + 1) {
+printf("next block (%ld == %ld + 1)\n", pkt_blk_num, wblk[1].block_num);
         // Finalize first working block
         finalize_block(wblk);
         // Update ndrop counter
@@ -1089,6 +1118,7 @@ printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_
             pkt_seq_num);
 #endif
       }
+printf("packet block: %ld   working blocks: %ld %lu\n", pkt_blk_num, wblk[0].block_num, wblk[1].block_num);
 
       // TODO Check START/STOP status
 
