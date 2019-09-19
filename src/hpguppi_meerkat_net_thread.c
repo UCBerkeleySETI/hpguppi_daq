@@ -200,8 +200,8 @@ static void finalize_block(struct block_info *bi)
   }
   char *header = block_info_header(bi);
   char dropstat[128];
-  bi->ndrop = (BLOCK_DATA_SIZE / bi->pkts_per_block) - bi->npacket;
-  sprintf(dropstat, "%d/%lu", bi->ndrop, (BLOCK_DATA_SIZE / bi->pkts_per_block));
+  bi->ndrop = bi->pkts_per_block - bi->npacket;
+  sprintf(dropstat, "%d/%lu", bi->ndrop, bi->pkts_per_block);
   hputi8(header, "PKTIDX", bi->block_num * bi->pktidx_per_block);
   hputi4(header, "NPKT", bi->npacket);
   hputi4(header, "NDROP", bi->ndrop);
