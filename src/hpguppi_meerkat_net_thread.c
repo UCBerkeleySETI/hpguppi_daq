@@ -292,26 +292,39 @@ static void copy_packet_data_to_databuf(struct block_info *bi,
     const struct mk_feng_spead_info * p_fesi,
     uint8_t * p_spead_payload)
 {
-  int i;
   uint8_t * src = p_spead_payload;
   uint8_t * dst = (uint8_t *)block_info_data(bi);
+  int bytes_to_copy = p_fesi->payload_size;
 
-  // TODO
-  //// Compute starting packet offset into data block
-  //off_t offset = (off_t)(packet_idx % PKSUWL_PKTIDX_PER_BLOCK);
-  //// Convert to sample (i.e. uint32_t) offset
-  //offset *= 2 /*pols*/ * PKSUWL_SAMPLES_PER_PKT;
-  //// Adjust for polarization
-  //offset += (vdif_get_thread_id(vdifhdr) & 1);
-  //// Update destination pointer
-  //dst += offset;
+  // istride is the size of a HNTIME samples in bytes
+  size_t istride = 4 * p_oi->hntime;
 
-  // Copy samples.
+  // ostride is the size of a "row" in bytes
+  size_t ostride = 4 * mk_ntime(BLOCK_DATA_SIZE, *p_oi);
+
+  // slot_idx is the index of the slot in the block where the packet's heap goes
+  int slot_idx = mk_pktidx(*p_oi, *p_fesi) % bi->pktidx_per_block;
+
+  // block_chan is the "row" in the data block where this packet's heap starts
+  int block_chan = mk_block_chan(*p_oi, *p_fesi);
+
+  // Advance dst to start of slot
+  dst += slot_idx * istride;
+
+  // Advance dst to start of heap
+  dst += block_chan * ostride;
+
+  // Advance dst to heap offset.
   // For now assume that packets are hntime aligned within heap.
-  for(i=0 ; i<p_oi->hnchan; i++) {
-    memcpy(dst, src, 4 * p_oi->hntime);
-    src += 4 * p_oi->hntime;
-    dst += 4 * mk_ntime(BLOCK_DATA_SIZE, *p_oi);
+  dst += (p_fesi->heap_offset / istride) * ostride;
+ 
+  // Copy samples
+  // TODO Ensure that bytes_to_copy is a multiple of istride.
+  while(bytes_to_copy > 0) {
+    memcpy(dst, src, istride);
+    src += istride;
+    dst += ostride;
+    bytes_to_copy -= istride;
   }
 }
 
