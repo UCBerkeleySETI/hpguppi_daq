@@ -357,6 +357,7 @@ static int init(hashpipe_thread_args_t *args)
   double obsfreq=0;
   double obsbw=128.0;
   int obsnchan=1;
+  int nants=1;
   int overlap=0;
   double tbin=0.0;
   char obs_mode[80];
@@ -406,6 +407,7 @@ char *pchar;
     hgeti4(st.buf, "BINDPORT", &net_params->port);
     hgeti4(st.buf, "BLOCSIZE", &blocsize);
     hgeti4(st.buf, "DIRECTIO", &directio);
+    hgeti4(st.buf, "NANTS", &nants);
     hgeti4(st.buf, "NBITS", &nbits);
     hgeti4(st.buf, "NPOL", &npol);
     hgetr8(st.buf, "OBSFERQ", &obsfreq);
@@ -417,7 +419,7 @@ char *pchar;
 if((pchar = strchr(dest_ip, '+'))) *pchar = '\0';
 
     // Calculate TBIN from OBSNCHAN and OBSBW
-    tbin = fabs(obsnchan / obsbw) / 1e6;
+    tbin = fabs(obsnchan / nants / obsbw) / 1e6;
 
     // Store bind host/port info etc in status buffer (in case it was not there
     // before).
