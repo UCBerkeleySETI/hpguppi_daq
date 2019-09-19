@@ -1081,18 +1081,18 @@ printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_
 
       // Only copy packet data and count packet if its wblk_idx is valid
       if(0 <= wblk_idx && wblk_idx < 2) {
+        // Update block's packets per block.  Not needed for each packet, but
+        // probably just as fast to do it for each packet rather than
+        // check-and-update-only-if-needed for each packet.
+        wblk[wblk_idx].pkts_per_block = BLOCK_DATA_SIZE / feng_spead_info.payload_size;
+        wblk[wblk_idx].pktidx_per_block = pktidx_per_block;
+
         // Copy packet data to data buffer of working block
         copy_packet_data_to_databuf(wblk+wblk_idx,
             &obs_info, &feng_spead_info, p_spead_payload);
 
         // Count packet for block
         wblk[wblk_idx].npacket++;
-
-        // Update block's packets per block.  Not needed for each packet, but
-        // probably just as fast to do it for each packet rather than
-        // check-and-update-only-if-needed for each packet.
-        wblk[wblk_idx].pkts_per_block = BLOCK_DATA_SIZE / feng_spead_info.payload_size;
-        wblk[wblk_idx].pktidx_per_block = pktidx_per_block;
       }
 
 #ifdef USE_IBVERBS
