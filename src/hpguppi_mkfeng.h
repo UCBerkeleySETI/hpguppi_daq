@@ -91,29 +91,21 @@
 //     PIPERBLK = -------------------
 //                   heapset_size
 //
-// Assuming an infinite number of data blocks, the "absolute" block index for a
-// given PKTIDX value is calculated (using integer division) as:
-//
-//                         PKTIDX
-//     abs_block_index = ----------
-//                        PIPERBLK
-//
-//  But since the shared memory ring buffer has a limited number of blocks
-//  ("nblocks"), the physical block index used is calculated (using integer
-//  division) as:
+// Assuming an infinite number of data blocks, the "absolute" block number for
+// a given PKTIDX value is calculated (using integer division) as:
 //
 //                          PKTIDX
-//     phys_block_index = ---------- mod nblocks
+//     abs_block_number = ----------
 //                         PIPERBLK
 //
-// The PIPERBLK regions in the data buffer are referred to as "slots" and are
-// indexed from 0 to PIPERBLK-1.  The slot index for a given PKTIDX is
+// The PIPERBLK regions in a data buffer block are referred to as "slots" and
+// are indexed from 0 to PIPERBLK-1.  The slot index for a given PKTIDX is
 // determined by:
 //
 //     slot_idx = PKTIDX mod PIPERBLK
 //
 // For example, assuming nblocks=3 and PIPERBLK=4, the heapset for PKTIDX=93
-// would go in abs_block_index=23, phys_block_index=2, slot_idx=1.
+// would go in abs_block_number=23, slot_idx=1.
 //
 // ## Data arrangement within a block
 //
