@@ -368,7 +368,7 @@ mk_parse_mkfeng_packet(const struct udppkt *p, struct mk_feng_spead_info * fesi)
   uint64_t offset = 0;
 
   for(i=0; i<nitems; i++) {
-    item = *p_spead++;
+    item = be64toh(*p_spead++);
     switch(spead_id(item)) {
       case SPEAD_ID_IMM_HEAP_COUNTER:
         fesi->heap_counter = spead_imm_value(item);
