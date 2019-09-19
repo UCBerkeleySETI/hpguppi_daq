@@ -280,14 +280,14 @@ uint64_t
 calc_mk_block_chan(uint64_t feng_id, uint32_t nstrm,
     uint32_t hnchan, uint64_t feng_chan, uint32_t schan)
 {
-  return feng_chan * nstrm * hnchan + (feng_chan - schan);
+  return feng_id * nstrm * hnchan + (feng_chan - schan);
 }
 
 static inline
 uint64_t
 mk_block_chan(const struct mk_obs_info oi, const struct mk_feng_spead_info fesi)
 {
-  return calc_mk_block_chan(fesi.feng_chan, oi.nstrm,
+  return calc_mk_block_chan(fesi.feng_id, oi.nstrm,
       oi.hnchan, fesi.feng_chan, oi.schan);
 }
 
