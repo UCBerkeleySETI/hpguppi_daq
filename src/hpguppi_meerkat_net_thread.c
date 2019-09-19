@@ -141,7 +141,7 @@ struct block_info {
   struct hpguppi_input_databuf *db; // Pointer to overall shared mem databuf
   // Set at start of block
   int block_idx;                    // Block index number in databuf
-  uint64_t block_num;               // Absolute block number
+  int64_t block_num;                // Absolute block number
   uint64_t pktidx_per_block;
   uint64_t pkts_per_block;
   // Incremented throughout duration of block
@@ -175,7 +175,7 @@ static void reset_block_info_stats(struct block_info *bi)
 // bi->block_num is always set and the stats are always reset.
 // bi->pkts_per_block is set of pkt_size > 0.
 static void init_block_info(struct block_info *bi,
-    struct hpguppi_input_databuf *db, int block_idx, uint64_t block_num,
+    struct hpguppi_input_databuf *db, int block_idx, int64_t block_num,
     uint64_t pkts_per_block)
 {
   if(db) {
@@ -214,7 +214,7 @@ static void finalize_block(struct block_info *bi)
 //
 // NB: The caller must wait for the new data block to be free after this
 // function returns!
-static void increment_block(struct block_info *bi, uint64_t block_num)
+static void increment_block(struct block_info *bi, int64_t block_num)
 {
   if(bi->block_idx < 0) {
     hashpipe_warn(__FUNCTION__,
@@ -545,7 +545,7 @@ int debug_i=0, debug_j=0;
 
   // Packet block variables
   uint64_t pkt_seq_num = 0;
-  uint64_t pkt_blk_num = 0;
+  int64_t pkt_blk_num = 0; // Signed to avoid problems comparing with -1
   uint64_t start_seq_num=0;
   uint64_t stop_seq_num=0;
   uint64_t status_seq_num;
@@ -1042,11 +1042,12 @@ return(NULL);
         wait_for_block_free(&wblk[1], &st, status_key);
       } else if(pkt_blk_num < wblk[0].block_num - 1
       || pkt_blk_num > wblk[1].block_num + 1) {
+printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_num, wblk[1].block_num);
         // Should only happen when transitioning into LISTEN, so warn about it
         hashpipe_warn("hpguppi_meerkat_net_thread",
             "working blocks reinit due to packet discontinuity (PKTIDX %lu)",
             pkt_seq_num);
-        // Re-init working blocks for next block number
+        // Re-init working blocks for block number *after* current packet's block
         // and clear their data buffers
         for(wblk_idx=0; wblk_idx<2; wblk_idx++) {
           init_block_info(wblk+wblk_idx, NULL, -1, pkt_blk_num+wblk_idx+1,
