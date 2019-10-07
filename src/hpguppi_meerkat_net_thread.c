@@ -35,6 +35,8 @@
 #include "hpguppi_databuf.h"
 #include "hpguppi_mkfeng.h"
 
+#define USE_IBVERBS
+
 #ifdef USE_IBVERBS
 #include "hashpipe_ibverbs.h"
 #define DEFAULT_MAX_PKT_SIZE (8400)
