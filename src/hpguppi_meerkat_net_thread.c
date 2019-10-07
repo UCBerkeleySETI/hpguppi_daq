@@ -45,9 +45,15 @@
 #include <net/if.h> // Fpr IFNAMSIZ
 // Sizes for pktsock.  Make frame_size be a multiple of page size so that
 // frames will be contiguous and blocks will be page aligned in mapped mempory.
+#if 0
 #define PKTSOCK_BYTES_PER_FRAME (3*4096)
 #define PKTSOCK_FRAMES_PER_BLOCK (1024)
 #define PKTSOCK_NBLOCKS (64)
+#else
+#define PKTSOCK_BYTES_PER_FRAME (4*4096)
+#define PKTSOCK_FRAMES_PER_BLOCK (8)
+#define PKTSOCK_NBLOCKS (800*12)
+#endif
 #define PKTSOCK_NFRAMES (PKTSOCK_FRAMES_PER_BLOCK * PKTSOCK_NBLOCKS)
 
 // Adds or drops membership in a multicast group.  The `option` parameter
