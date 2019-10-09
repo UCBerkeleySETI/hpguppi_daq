@@ -651,8 +651,8 @@ int debug_i=0, debug_j=0;
   uint64_t elapsed_stat = 0;
   uint64_t count_stat = 0;
   struct timespec ts_start_proc, ts_stop_proc;
-  //TODO?uint64_t elapsed_proc = 0;
-  //TODO?uint64_t count_proc = 0;
+  uint64_t elapsed_proc = 0;
+  uint64_t count_proc = 0;
 
   // Initialize working blocks
   for(wblk_idx=0; wblk_idx<2; wblk_idx++) {
@@ -1085,15 +1085,21 @@ printf("\n");
           hputu8(st.buf, "PSDRPS", u64tmp);
 #endif // !USE_IBVERBS
 
-// TODO
 #if 0
-          // Calculate processing speed in Gbps (8*bytes/ns)
-          hputi8(st.buf, "ELPSBITS", elapsed_bytes << 3);
-          hputi8(st.buf, "ELPSNS", elapsed_ns);
-          hputr4(st.buf, "NETGBPS", 8.0*elapsed_bytes / elapsed_ns);
-          elapsed_bytes = 0;
-          elapsed_ns = 0;
+          // Calculate receive speed in packets per second
+          hputi8(st.buf, "RECVNS", elapsed_recv);
+          hputi8(st.buf, "RECVPKTS", count_recv);
+          hputr4(st.buf, "RECVPPS", count_recv / (elapsed_recv/1e9));
+          elapsed_recv = 0;
+          count_recv = 0;
 #endif
+
+          // Calculate processing speed in packets per second
+          hputi8(st.buf, "PROCNS", elapsed_proc);
+          hputi8(st.buf, "PROCPKTS", count_proc);
+          hputr4(st.buf, "PROCPPS", count_proc / (elapsed_proc/1e9));
+          elapsed_proc = 0;
+          count_proc = 0;
         }
         hashpipe_status_unlock_safe(&st);
       } // End status buffer block update
@@ -1168,8 +1174,9 @@ printf("packet block: %ld   working blocks: %ld %lu\n", pkt_blk_num, wblk[0].blo
         copy_packet_data_to_databuf(wblk+wblk_idx,
             &obs_info, &feng_spead_info, p_spead_payload);
 
-        // Count packet for block
+        // Count packet for block and for processing stats
         wblk[wblk_idx].npacket++;
+        count_proc++;
       }
 
 #ifdef USE_IBVERBS
@@ -1177,6 +1184,7 @@ printf("packet block: %ld   working blocks: %ld %lu\n", pkt_blk_num, wblk[0].blo
 #endif // USE_IBVERBS
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &ts_stop_proc);
+    elapsed_proc += ELAPSED_NS(ts_start_proc, ts_stop_proc);
 
     // Release packets
 #ifdef USE_IBVERBS
