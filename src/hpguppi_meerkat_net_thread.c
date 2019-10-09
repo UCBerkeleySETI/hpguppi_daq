@@ -208,7 +208,16 @@ static void finalize_block(struct block_info *bi)
   }
   char *header = block_info_header(bi);
   char dropstat[128];
-  bi->ndrop = bi->pkts_per_block - bi->npacket;
+  if(bi->pkts_per_block > bi->npacket) {
+    bi->ndrop = bi->pkts_per_block - bi->npacket;
+  }
+#if 0
+if(bi->pkts_per_block != bi->npacket) {
+  printf("pktidx %ld pkperblk %ld npkt %u\n",
+    bi->block_num * bi->pktidx_per_block,
+    bi->pkts_per_block, bi->npacket);
+}
+#endif
   sprintf(dropstat, "%d/%lu", bi->ndrop, bi->pkts_per_block);
   hputi8(header, "PKTIDX", bi->block_num * bi->pktidx_per_block);
   hputi4(header, "NPKT", bi->npacket);
