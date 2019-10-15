@@ -18,16 +18,16 @@ hclocks=2097152
 
 $(dirname $0)/hpguppi_init.sh meerkat 0 \
   -o DESTIP="0.0.0.0" \
-	-o FENCHAN=${fenchan} \
-	-o NANTS=${nants} \
-	-o NSTRM=${nstrm} \
-	-o HNTIME=${hntime} \
-	-o HNCHAN=${hnchan} \
-	-o SCHAN=${schan} \
-	-o CHAN_BW=${chan_bw} \
+  -o FENCHAN=${fenchan} \
+  -o NANTS=${nants} \
+  -o NSTRM=${nstrm} \
+  -o HNTIME=${hntime} \
+  -o HNCHAN=${hnchan} \
+  -o SCHAN=${schan} \
+  -o CHAN_BW=${chan_bw} \
   -o OBSBW=${obsbw} \
   -o OBSFREQ=${obsfreq} \
-	-o OBSNCHAN=${obsnchan} \
+  -o OBSNCHAN=${obsnchan} \
   -o HCLOCKS=${hclocks} \
   "${@}"
 
