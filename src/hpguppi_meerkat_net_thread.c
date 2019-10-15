@@ -122,8 +122,8 @@ static int hpguppi_mcast_membership(int socket,
 // the processed PKTIDX is equal to PKTSTART the state transitions to RECORD
 // and the following actions occur:
 //
-//   1. The MJD of the observation start time is calculated from PKTIDX.
-//      from SYNCTIME and PKTIDX)
+//   1. The MJD of the observation start time is calculated from PKTIDX,
+//      SYNCTIME, and other parameters.
 //
 //   2. The packet stats counters are reset
 //
@@ -135,6 +135,8 @@ static int hpguppi_mcast_membership(int socket,
 // thread's output buffer) and full blocks are passed to the next thread (same
 // as in the LISTEN state).  When the processed PKTIDX is greater than or equal
 // to PKTSTOP the state transitions to LISTEN and STTVALID is set to 0.
+//
+// The PKTSTART/PKTSTOP tests are done every time the work blocks are advanced.
 //
 // The downstream thread (i.e. hpguppi_rawdisk_thread) is expected to use a
 // combination of PKTIDX, PKTSTART, PKTSTOP, and (optionally) STTVALID to
@@ -367,6 +369,53 @@ printf("\n");
     dst += ostride;
     bytes_to_copy -= istride;
   }
+}
+
+// Check the given pktidx value against the status buffer's PKTSTART/PKTSTOP
+// values. Logic goes something like this:
+//   if PKTSTART <= pktidx < PKTSTOPs
+//     if STTVALID == 0
+//       STTVALID=1
+//       calculate and store STT_IMJD, STT_SMJD
+//     endif
+//     return RECORD
+//   else
+//     STTVALID=0
+//     return LISTEN
+//   endif
+enum run_states check_start_stop(hashpipe_status_t *st, uint64_t pktidx)
+{
+  enum run_states retval = LISTEN;
+  uint32_t sttvalid = 0;
+  uint64_t pktstart = 0;
+  uint64_t pktstop = 0;
+
+  hashpipe_status_lock_safe(st);
+  {
+    hgetu4(st->buf, "STTVALID", &sttvalid);
+    hgetu8(st->buf, "PKTSTART", &pktstart);
+    hgetu8(st->buf, "PKTSTOP", &pktstop);
+
+    if(pktstart <= pktidx && pktidx < pktstop) {
+      retval = RECORD;
+      hputs(st->buf, "DAQSTATE", "RECORD");
+
+      if(sttvalid != 1) {
+        hputu4(st->buf, "STTVALID", 1);
+        // TODO Calc real values
+        hputu4(st->buf, "STT_IMJD", 0);
+        hputu4(st->buf, "STT_SMJD", 0);
+      }
+    } else {
+      hputs(st->buf, "DAQSTATE", "LISTEN");
+      if(sttvalid != 0) {
+        hputu4(st->buf, "STTVALID", 0);
+      }
+    }
+  }
+  hashpipe_status_unlock_safe(st);
+
+  return retval;
 }
 
 // Hashpipe threads typically perform some setup tasks in their init()
@@ -1124,11 +1173,15 @@ printf("next block (%ld == %ld + 1)\n", pkt_blk_num, wblk[1].block_num);
         ndrop_total += wblk->ndrop;
         // Shift working blocks
         wblk[0] = wblk[1];
+        // Check start/stop using wblk[0]'s first PKTIDX
+        state = check_start_stop(&st, wblk[0].block_num * pktidx_per_block);
         // Increment last working block
         increment_block(&wblk[1], pkt_blk_num);
         // Wait for new databuf data block to be free
         wait_for_block_free(&wblk[1], &st, status_key);
-      } else if(pkt_blk_num < wblk[0].block_num - 1
+      }
+      // Check for PKTIDX discontinuity
+      else if(pkt_blk_num < wblk[0].block_num - 1
       || pkt_blk_num > wblk[1].block_num + 1) {
 #if 0
 printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_num, wblk[1].block_num);
@@ -1145,6 +1198,9 @@ printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_
           // Clear data buffer
           memset(block_info_data(wblk+wblk_idx), 0, eff_block_size);
         }
+
+        // Check start/stop using wblk[0]'s first PKTIDX
+        state = check_start_stop(&st, wblk[0].block_num * pktidx_per_block);
 #if 0
 // This happens after discontinuities (e.g. on startup), so don't warn about
 // it.
