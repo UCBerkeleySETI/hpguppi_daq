@@ -456,7 +456,7 @@ static int init(hashpipe_thread_args_t *args)
   // Non-network essential paramaters
   int blocsize=BLOCK_DATA_SIZE;
   int directio=1;
-  int nbits=16;
+  int nbits=8;
   int npol=4;
   double obsfreq=0;
   double obsbw=128.0;
