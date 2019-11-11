@@ -21,7 +21,7 @@ int get_mjd_from_timeval(const struct timeval * tv,
     if (rv!=0) { return(HASHPIPE_ERR_GEN); }
 
     if (stt_imjd!=NULL) { *stt_imjd = (int)mjd; }
-    if (stt_smjd!=NULL) { *stt_smjd = gmt.tm_hour*3600 + gmt.tm_min*60 
+    if (stt_smjd!=NULL) { *stt_smjd = gmt.tm_hour*3600 + gmt.tm_min*60
         + gmt.tm_sec; }
     if (stt_offs!=NULL) { *stt_offs = tv->tv_usec*1e-6; }
 
@@ -38,11 +38,11 @@ int get_current_mjd(int *stt_imjd, int *stt_smjd, double *stt_offs)
     return get_mjd_from_timeval(&tv, stt_imjd, stt_smjd, stt_offs);
 }
 
-int datetime_from_mjd(long double MJD, int *YYYY, int *MM, int *DD, 
+int datetime_from_mjd(long double MJD, int *YYYY, int *MM, int *DD,
                       int *h, int *m, double *s) {
     int err;
     double fracday;
-    
+
     slaDjcl(MJD, YYYY, MM, DD, &fracday, &err);
     if (err == -1) { return(HASHPIPE_ERR_GEN); }
     fracday *= 24.0;  // hours
