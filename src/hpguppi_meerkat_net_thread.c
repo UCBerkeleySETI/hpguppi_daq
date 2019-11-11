@@ -383,6 +383,7 @@ printf("\n");
 //     STTVALID=0
 //     return LISTEN
 //   endif
+static
 enum run_states check_start_stop(hashpipe_status_t *st, uint64_t pktidx)
 {
   enum run_states retval = LISTEN;
