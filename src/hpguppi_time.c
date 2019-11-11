@@ -8,16 +8,14 @@
 #include <hashpipe.h>
 #include "slalib.h"
 
-int get_current_mjd(int *stt_imjd, int *stt_smjd, double *stt_offs) {
+int get_mjd_from_timeval(const struct timeval * tv,
+    int *stt_imjd, int *stt_smjd, double *stt_offs)
+{
     int rv;
-    struct timeval tv;
     struct tm gmt;
     double mjd;
 
-    rv = gettimeofday(&tv,NULL);
-    if (rv) { return(HASHPIPE_ERR_SYS); }
-
-    if (gmtime_r(&tv.tv_sec, &gmt)==NULL) { return(HASHPIPE_ERR_SYS); }
+    if (gmtime_r(&tv->tv_sec, &gmt)==NULL) { return(HASHPIPE_ERR_SYS); }
 
     slaCaldj(gmt.tm_year+1900, gmt.tm_mon+1, gmt.tm_mday, &mjd, &rv);
     if (rv!=0) { return(HASHPIPE_ERR_GEN); }
@@ -25,9 +23,19 @@ int get_current_mjd(int *stt_imjd, int *stt_smjd, double *stt_offs) {
     if (stt_imjd!=NULL) { *stt_imjd = (int)mjd; }
     if (stt_smjd!=NULL) { *stt_smjd = gmt.tm_hour*3600 + gmt.tm_min*60 
         + gmt.tm_sec; }
-    if (stt_offs!=NULL) { *stt_offs = tv.tv_usec*1e-6; }
+    if (stt_offs!=NULL) { *stt_offs = tv->tv_usec*1e-6; }
 
     return(HASHPIPE_OK);
+}
+
+int get_current_mjd(int *stt_imjd, int *stt_smjd, double *stt_offs)
+{
+    int rv;
+    struct timeval tv;
+
+    rv = gettimeofday(&tv,NULL);
+    if (rv) { return(HASHPIPE_ERR_SYS); }
+    return get_mjd_from_timeval(&tv, stt_imjd, stt_smjd, stt_offs);
 }
 
 int datetime_from_mjd(long double MJD, int *YYYY, int *MM, int *DD, 
