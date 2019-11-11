@@ -8,6 +8,26 @@
 #include <hashpipe.h>
 #include "slalib.h"
 
+int get_mjd_from_timespec(const struct timespec * ts,
+    int *stt_imjd, int *stt_smjd, double *stt_offs)
+{
+    int rv;
+    struct tm gmt;
+    double mjd;
+
+    if (gmtime_r(&ts->tv_sec, &gmt)==NULL) { return(HASHPIPE_ERR_SYS); }
+
+    slaCaldj(gmt.tm_year+1900, gmt.tm_mon+1, gmt.tm_mday, &mjd, &rv);
+    if (rv!=0) { return(HASHPIPE_ERR_GEN); }
+
+    if (stt_imjd!=NULL) { *stt_imjd = (int)mjd; }
+    if (stt_smjd!=NULL) { *stt_smjd = gmt.tm_hour*3600 + gmt.tm_min*60
+        + gmt.tm_sec; }
+    if (stt_offs!=NULL) { *stt_offs = ts->tv_nsec*1e-9; }
+
+    return(HASHPIPE_OK);
+}
+
 int get_mjd_from_timeval(const struct timeval * tv,
     int *stt_imjd, int *stt_smjd, double *stt_offs)
 {
