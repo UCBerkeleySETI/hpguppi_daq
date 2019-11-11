@@ -683,6 +683,7 @@ int debug_i=0, debug_j=0;
   uint64_t u64tmp = 0; // Used for status buffer interactions
   uint64_t max_recvpkt_count = 0;
   uint64_t ndrop_total = 0;
+  uint64_t nlate = 0;
 
   // Variables for handing received packets
 #ifdef USE_IBVERBS
@@ -1141,6 +1142,10 @@ printf("\n");
           u64tmp += ndrop_total; ndrop_total = 0;
           hputu8(st.buf, "NDROP", u64tmp);
 
+          hgetu8(st.buf, "NLATE", &u64tmp);
+          u64tmp += nlate; nlate = 0;
+          hputu8(st.buf, "NLATE", u64tmp);
+
 #ifndef USE_IBVERBS
           // Update PSPKTS and PSDRPS
           hashpipe_pktsock_stats(p_ps, &pspkts, &psdrps);
@@ -1212,7 +1217,6 @@ printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_
 
         // Check start/stop using wblk[0]'s first PKTIDX
         state = check_start_stop(&st, wblk[0].block_num * pktidx_per_block);
-#if 0
 // This happens after discontinuities (e.g. on startup), so don't warn about
 // it.
       } else if(pkt_blk_num == wblk[0].block_num - 1) {
@@ -1220,6 +1224,8 @@ printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_
         // TODO Move this check above the "once per block" status buffer
         // update (so we don't accidentally update status buffer based on a
         // late packet)?
+        nlate++;
+#if 0
         // Should "never" happen, so warn anbout it
         hashpipe_warn("hpguppi_meerkat_net_thread",
             "ignoring late packet (PKTIDX %lu)",
