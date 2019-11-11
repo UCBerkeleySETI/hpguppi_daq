@@ -33,6 +33,7 @@
 
 #include "hashpipe.h"
 #include "hpguppi_databuf.h"
+#include "hpguppi_time.h"
 #include "hpguppi_pksuwl.h"
 
 #ifdef USE_IBVERBS
@@ -323,6 +324,63 @@ static void copy_packet_data_to_databuf(uint64_t packet_idx,
     *dst++ = *src++ ^ 0x80008000;
     dst++; // Extra increment to interleave pols
   }
+}
+
+// Check the given pktidx value against the status buffer's PKTSTART/PKTSTOP
+// values. Logic goes something like this:
+//   if PKTSTART <= pktidx < PKTSTOPs
+//     if STTVALID == 0
+//       STTVALID=1
+//       calculate and store STT_IMJD, STT_SMJD
+//     endif
+//     return RECORD
+//   else
+//     STTVALID=0
+//     return LISTEN
+//   endif
+static
+enum run_states check_start_stop(hashpipe_status_t *st, uint64_t pktidx)
+{
+  enum run_states retval = LISTEN;
+  uint32_t sttvalid = 0;
+  uint64_t pktstart = 0;
+  uint64_t pktstop = 0;
+
+  struct timeval tv;
+
+  int    stt_imjd = 0;
+  int    stt_smjd = 0;
+  double stt_offs = 0;
+
+  hashpipe_status_lock_safe(st);
+  {
+    hgetu4(st->buf, "STTVALID", &sttvalid);
+    hgetu8(st->buf, "PKTSTART", &pktstart);
+    hgetu8(st->buf, "PKTSTOP", &pktstop);
+
+    if(pktstart <= pktidx && pktidx < pktstop) {
+      retval = RECORD;
+      hputs(st->buf, "DAQSTATE", "RECORD");
+
+      if(sttvalid != 1) {
+        hputu4(st->buf, "STTVALID", 1);
+        // Calc IMJD/SMJD/OFFS
+        pksuwl_pktidx_to_timeval(pktstart, &tv);
+        get_mjd_from_timeval(&tv, &stt_imjd, &stt_smjd, &stt_offs);
+        hputu4(st->buf, "STT_IMJD", stt_imjd);
+        hputu4(st->buf, "STT_SMJD", stt_smjd);
+        hputr8(st->buf, "STT_OFFS", stt_offs);
+      }
+    } else {
+      hputs(st->buf, "DAQSTATE", "LISTEN");
+      if(sttvalid != 0) {
+        hputu4(st->buf, "STTVALID", 0);
+      }
+    }
+  }
+  hashpipe_status_unlock_safe(st);
+
+  return retval;
 }
 
 // Hashpipe threads typically perform some setup tasks in their init()
@@ -951,11 +1009,15 @@ static void * run(hashpipe_thread_args_t * args)
         }
         // Shift working blocks
         wblk[0] = wblk[1];
+        // Check start/stop using wblk[0]'s first PKTIDX
+        state = check_start_stop(&st, wblk[0].block_num * PKSUWL_PKTIDX_PER_BLOCK);
         // Increment last working block
         increment_block(&wblk[1], pkt_blk_num);
         // Wait for new databuf data block to be free
         wait_for_block_free(&wblk[1], &st, status_key);
-      } else if(pkt_blk_num < wblk[0].block_num - 1
+      }
+      // Check for PKTIDX discontinuity
+      else if(pkt_blk_num < wblk[0].block_num - 1
       || pkt_blk_num > wblk[1].block_num + 1) {
         // Should only happen when transitioning into LISTEN, so warn about it
         hashpipe_warn("hpguppi_pksuwl_net_thread",
@@ -968,6 +1030,9 @@ static void * run(hashpipe_thread_args_t * args)
           // Clear data buffer
           memset(block_info_data(wblk+wblk_idx), 0, PKSUWL_BLOCK_DATA_SIZE);
         }
+
+        // Check start/stop using wblk[0]'s first PKTIDX
+        state = check_start_stop(&st, wblk[0].block_num * PKSUWL_PKTIDX_PER_BLOCK);
 #if 0
 // This happens after discontinuities (e.g. on startup), so don't warn about
 // it.
@@ -982,8 +1047,6 @@ static void * run(hashpipe_thread_args_t * args)
             pkt_seq_num);
 #endif
       }
-
-      // TODO Check START/STOP status
 
       // Once we get here, compute the index of the working block corresponding
       // to this packet.  The computed index may not correspond to a valid
