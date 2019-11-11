@@ -4,7 +4,10 @@
 // interface.  This thread can be compiled to use packet sockets or InfiniBand
 // Verbs for packet capture.  The default is to compile for packet sockets
 // (since they seem to work better than ibverbs on ConnectX-3, go figure).  To
-// compile for ibverbs, add "-DUSE_IBVERBS" to CFLAGS when compiling.
+// compile for ibverbs, add "-DUSE_IBVERBS" to CFLAGS when compiling.  Note
+// that value assigned to USE_IBVERBS is not significant. "-DUSE_IBVERBS=0" has
+// the same effect as "-DUSE_IBVERBS=1".
+#define USE_IBVERBS
 
 // TODO TEST Wait for first (second?) start-of-block when transitioning into
 //           LISTEN state so that the first block will be complete.
@@ -35,8 +38,6 @@
 #include "hpguppi_databuf.h"
 #include "hpguppi_time.h"
 #include "hpguppi_mkfeng.h"
-
-#define USE_IBVERBS
 
 #ifdef USE_IBVERBS
 #include "hashpipe_ibverbs.h"
