@@ -522,6 +522,16 @@ char *pchar;
     hgets(st.buf, "DESTIP", 80, dest_ip);
 if((pchar = strchr(dest_ip, '+'))) *pchar = '\0';
 
+    // Prevent div-by-zero errors (should never happen...)
+    if(nants == 0) {
+      nants = 1;
+      hputi4(st.buf, "NANTS", nants);
+    }
+    if(obsbw == 0) {
+      obsbw = 1.0;
+      hputr8(st.buf, "OBSBW", obsbw);
+    }
+
     // Calculate TBIN from OBSNCHAN and OBSBW
     tbin = fabs(obsnchan / nants / obsbw) / 1e6;
 
