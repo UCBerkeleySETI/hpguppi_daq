@@ -33,6 +33,7 @@
 
 #include "hashpipe.h"
 #include "hpguppi_databuf.h"
+#include "hpguppi_time.h"
 #include "hpguppi_mkfeng.h"
 
 #define USE_IBVERBS
@@ -391,6 +392,18 @@ enum run_states check_start_stop(hashpipe_status_t *st, uint64_t pktidx)
   uint64_t pktstart = 0;
   uint64_t pktstop = 0;
 
+  uint64_t hclocks = 1;
+  uint32_t fenchan = 1;
+  uint64_t synctime = 0;
+  double chan_bw = 1.0;
+
+  double realtime_secs = 0.0;
+  struct timespec ts;
+
+  int    stt_imjd = 0;
+  int    stt_smjd = 0;
+  double stt_offs = 0;
+
   hashpipe_status_lock_safe(st);
   {
     hgetu4(st->buf, "STTVALID", &sttvalid);
@@ -403,9 +416,29 @@ enum run_states check_start_stop(hashpipe_status_t *st, uint64_t pktidx)
 
       if(sttvalid != 1) {
         hputu4(st->buf, "STTVALID", 1);
-        // TODO Calc real values
-        hputu4(st->buf, "STT_IMJD", 0);
-        hputu4(st->buf, "STT_SMJD", 0);
+
+        hgetu8(st->buf, "HCLOCKS", &hclocks);
+        hgetu4(st->buf, "FENCHAN", &fenchan);
+        hgetr8(st->buf, "CHAN_BW", &chan_bw);
+        hgetu8(st->buf, "SYNCTIME", &synctime);
+
+        // Calc real-time seconds since SYNCTIME for pktidx:
+        //
+        //                        pktidx * hclocks
+        //     realtime_secs = -----------------------
+        //                      2 * fenchan * chan_bw
+        if(fenchan * chan_bw != 0.0) {
+          realtime_secs = (pktidx * hclocks) / (2.0 * fenchan * chan_bw);
+        }
+
+        ts.tv_sec = (time_t)(synctime + floor(realtime_secs));
+        ts.tv_nsec = (long)(fmod(realtime_secs, 1) * 1e9);
+
+        get_mjd_from_timespec(&ts, &stt_imjd, &stt_smjd, &stt_offs);
+
+        hputu4(st->buf, "STT_IMJD", stt_imjd);
+        hputu4(st->buf, "STT_SMJD", stt_smjd);
+        hputr8(st->buf, "STT_OFFS", stt_offs);
       }
     } else {
       hputs(st->buf, "DAQSTATE", "LISTEN");
