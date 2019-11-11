@@ -185,4 +185,23 @@ pksuwl_get_pktidx(struct vdifhdr * p)
   return pktidx;
 }
 
+static inline
+void
+pksuwl_pktidx_to_timeval(uint64_t pktidx, struct timeval *tv)
+{
+  tv->tv_sec = pktidx / PKSUWL_PKTIDX_PER_SEC;
+  tv->tv_usec = (pktidx % PKSUWL_PKTIDX_PER_SEC) * PKSUWL_NS_PER_PKT / 1000;
+}
+
+#if 0
+// Not used, but here it is if needed someday...
+static inline
+void
+pksuwl_pktidx_to_timespec(uint64_t pktidx, struct timespec *ts)
+{
+  ts->tv_sec = pktidx / PKSUWL_PKTIDX_PER_SEC;
+  ts->tv_nsec = (pktidx % PKSUWL_PKTIDX_PER_SEC) * PKSUWL_NS_PER_PKT;
+}
+#endif
+
 #endif // _HPGUPPI_PKSUWL_H_
