@@ -1188,6 +1188,14 @@ fflush(stdout);
       // Parse packet
       p_spead_payload = mk_parse_mkfeng_packet(p_udppkt, &feng_spead_info);
 
+      // Ignore packets with FID >= NANTS
+      if(feng_spead_info.feng_id >= obs_info.nants) {
+#ifndef USE_IBVERBS
+        hashpipe_pktsock_release_frame(p_frame);
+#endif // USE_IBVERBS
+        continue;
+      }
+
       // Count packet
       packet_count++;
 
