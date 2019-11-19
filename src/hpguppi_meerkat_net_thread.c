@@ -7,7 +7,13 @@
 // compile for ibverbs, add "-DUSE_IBVERBS" to CFLAGS when compiling.  Note
 // that value assigned to USE_IBVERBS is not significant. "-DUSE_IBVERBS=0" has
 // the same effect as "-DUSE_IBVERBS=1".
+#if 1
 #define USE_IBVERBS
+#else
+#ifdef USE_IBVERBS
+#undef USE_IBVERBS
+#endif
+#endif
 
 // TODO TEST Wait for first (second?) start-of-block when transitioning into
 //           LISTEN state so that the first block will be complete.
