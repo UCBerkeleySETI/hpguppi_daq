@@ -247,21 +247,21 @@ mk_pktidx(const struct mk_obs_info oi, const struct mk_feng_spead_info fesi)
   return calc_mk_pktidx(fesi.timestamp, oi.hclocks);
 }
 
-// For MeerKAT, the NCHAN parameter represents the total number of frequency
+// For MeerKAT, the OBSNCHAN parameter represents the total number of frequency
 // channels processed.  It is the number of antennas times the number of
 // streams per antenna times the number of channels per heap/stream.
 static inline
 uint32_t
-calc_mk_nchan(uint32_t nants, uint32_t nstrm, uint32_t hnchan)
+calc_mk_obsnchan(uint32_t nants, uint32_t nstrm, uint32_t hnchan)
 {
   return nants * nstrm * hnchan;
 }
 
 static inline
 uint32_t
-mk_nchan(const struct mk_obs_info oi)
+mk_obsnchan(const struct mk_obs_info oi)
 {
-  return calc_mk_nchan(oi.nants, oi.nstrm, oi.hnchan);
+  return calc_mk_obsnchan(oi.nants, oi.nstrm, oi.hnchan);
 }
 
 // Calculate the block's channel number for a given feng_id's feng_chan.  Needs
@@ -305,7 +305,7 @@ static inline
 uint32_t
 mk_pktidx_per_block(size_t block_size, const struct mk_obs_info oi)
 {
-  return calc_mk_pktidx_per_block(block_size, mk_nchan(oi), oi.hntime);
+  return calc_mk_pktidx_per_block(block_size, mk_obsnchan(oi), oi.hntime);
 }
 
 // For MeerKAT, the NTIME parameter (not stored in the status buffer or GUPPI
@@ -325,7 +325,7 @@ static inline
 uint32_t
 mk_ntime(size_t block_size, const struct mk_obs_info oi)
 {
-  return calc_mk_ntime(block_size, mk_nchan(oi), oi.hntime);
+  return calc_mk_ntime(block_size, mk_obsnchan(oi), oi.hntime);
 }
 
 // Calculate the effective block size for the given max block size, nchan, and
@@ -343,7 +343,7 @@ static inline
 uint32_t
 mk_block_size(size_t block_size, const struct mk_obs_info oi)
 {
-  return calc_mk_block_size(block_size, mk_nchan(oi), oi.hntime);
+  return calc_mk_block_size(block_size, mk_obsnchan(oi), oi.hntime);
 }
 
 // Parses a MeerKAT F Engine packet, stores metadata in fesi, returns pointer

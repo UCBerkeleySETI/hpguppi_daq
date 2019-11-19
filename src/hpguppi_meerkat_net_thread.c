@@ -642,7 +642,7 @@ if((pchar = strchr(dest_ip, '+'))) *pchar = '\0';
     hputi4(st.buf, "NBITS", nbits);
     hputi4(st.buf, "NPOL", npol);
     hputr8(st.buf, "OBSBW", obsbw);
-    hputi4(st.buf, "OBSNCHAN", obsnchan); // TODO Calc from obs info
+    hputi4(st.buf, "OBSNCHAN", obsnchan);
     hputi4(st.buf, "OVERLAP", overlap);
     // Force PKTFMT to be "SPEAD"
     hputs(st.buf, "PKTFMT", "SPEAD");
@@ -799,9 +799,11 @@ int debug_i=0, debug_j=0;
   struct mk_obs_info obs_info;
   mk_obs_info_init(&obs_info);
 
+  // OBSNCHAN is total number of channels handled by this instance.
+  // For arrays like MeerKAT, it is NANTS*NSTRM*HNCHAN.
+  int obsnchan = 1;
   // PKTIDX per block (depends on obs_info).  Init to 0 to cause div-by-zero
   // error if using it unintialized (crash early, crash hard!).
-  // TODO Store in status buffer using PIPERBLK
   uint32_t pktidx_per_block = 0;
   // Effective block size (will be less than BLOCK_DATA_SIZE when
   // BLOCK_DATA_SIZE is not divisible by NCHAN and/or HNTIME.
@@ -842,7 +844,8 @@ int debug_i=0, debug_j=0;
 
     // If obs_info is valid
     if(mk_obs_info_valid(obs_info)) {
-      // Update pktidx_per_block and eff_block_size
+      // Update obsnchan, pktidx_per_block, and eff_block_size
+      obsnchan = mk_obsnchan(obs_info);
       pktidx_per_block = mk_pktidx_per_block(BLOCK_DATA_SIZE, obs_info);
       eff_block_size = mk_block_size(BLOCK_DATA_SIZE, obs_info);
     }
@@ -856,6 +859,7 @@ int debug_i=0, debug_j=0;
     hputu8(st.buf, "HCLOCKS", obs_info.hclocks);
     hputi4(st.buf, "SCHAN",   obs_info.schan);
 
+    hputu4(st.buf, "OBSNCHAN", obsnchan);
     hputu4(st.buf, "PIPERBLK", pktidx_per_block);
     hputi4(st.buf, "BLOCSIZE", eff_block_size);
   }
@@ -943,6 +947,18 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
         hgetu8(st.buf, "HCLOCKS", &obs_info.hclocks);
         hgeti4(st.buf, "SCHAN",   &obs_info.schan);
 
+        // If obs_info is valid
+        if(mk_obs_info_valid(obs_info)) {
+          // Update obsnchan, pktidx_per_block, and eff_block_size
+          obsnchan = mk_obsnchan(obs_info);
+          pktidx_per_block = mk_pktidx_per_block(BLOCK_DATA_SIZE, obs_info);
+          eff_block_size = mk_block_size(BLOCK_DATA_SIZE, obs_info);
+
+          hputu4(st.buf, "OBSNCHAN", obsnchan);
+          hputu4(st.buf, "PIPERBLK", pktidx_per_block);
+          hputi4(st.buf, "BLOCSIZE", eff_block_size);
+        }
+
         if(curtime != lasttime) {
           lasttime = curtime;
           hputs(st.buf,  "DAQPULSE", timestr);
@@ -957,10 +973,6 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
       if(mk_obs_info_valid(obs_info) &&
           inet_aton(dest_ip_str, &dest_ip) &&
           dest_ip.s_addr != INADDR_ANY) {
-
-        // Update pktidx_per_block and eff_block_size
-        pktidx_per_block = mk_pktidx_per_block(BLOCK_DATA_SIZE, obs_info);
-        eff_block_size = mk_block_size(BLOCK_DATA_SIZE, obs_info);
 
 #ifdef USE_IBVERBS
         // Add flow and change state to listen
