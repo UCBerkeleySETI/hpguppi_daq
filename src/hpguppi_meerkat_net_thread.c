@@ -34,6 +34,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include <immintrin.h>
+
 #include "hashpipe.h"
 #include "hpguppi_databuf.h"
 #include "hpguppi_time.h"
@@ -146,6 +148,28 @@ static int hpguppi_mcast_membership(int socket,
 // to disk).
 
 enum run_states {IDLE, LISTEN, RECORD};
+
+#if 0
+// Non-temporal (cache bypass) clearing of memory
+static
+void clear_memory(void * dst, size_t size)
+{
+  // Create 256-bit (32-byte) zero value
+  const __m256i m256 = _mm256_setzero_si256();
+
+  // Cast dst to __m256i pointer
+  __m256i * p256 = (__m256i *)dst;
+
+  // Convert size from 1 byte units to 32 byte units
+  size >>= 5;
+
+  // While size > 0
+  while(size) {
+    *p256++ = m256;
+    size--;
+  }
+}
+#endif
 
 // Structure related to block management
 struct block_info {
@@ -293,7 +317,12 @@ static void wait_for_block_free(const struct block_info * bi,
   memcpy(block_info_header(bi), st->buf, HASHPIPE_STATUS_TOTAL_SIZE);
   hashpipe_status_unlock_safe(st);
 
-  memset(block_info_data(bi), 0, BLOCK_DATA_SIZE);
+#if 0
+  // TODO Move this out of net thread (takes too long)
+  // TODO Just clear effective block size?
+  //memset(block_info_data(bi), 0, BLOCK_DATA_SIZE);
+  clear_memory(block_info_data(bi), BLOCK_DATA_SIZE);
+#endif
 }
 
 // The copy_packet_data_to_databuf() function does what it says: copies packet
@@ -1245,8 +1274,12 @@ printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_
         for(wblk_idx=0; wblk_idx<2; wblk_idx++) {
           init_block_info(wblk+wblk_idx, NULL, -1, pkt_blk_num+wblk_idx+1,
               eff_block_size / feng_spead_info.payload_size);
+#if 0
           // Clear data buffer
-          memset(block_info_data(wblk+wblk_idx), 0, eff_block_size);
+          // TODO Move this out of net thread (takes too long)
+          //memset(block_info_data(wblk+wblk_idx), 0, eff_block_size);
+          clear_memory(block_info_data(wblk+wblk_idx), eff_block_size);
+#endif
         }
 
         // Check start/stop using wblk[0]'s first PKTIDX
