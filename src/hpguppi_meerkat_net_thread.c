@@ -325,6 +325,40 @@ static void wait_for_block_free(const struct block_info * bi,
 #endif
 }
 
+#if 0 // debug(1) vs real(0) copy
+struct ts_mk_feng_spead_info {
+  struct timespec ts;
+  struct mk_feng_spead_info fesi;
+};
+
+struct debug_data_block {
+  uint64_t npkts;
+  struct ts_mk_feng_spead_info ts_fesi[];
+};
+
+// Append spead header info to data block
+static void copy_packet_data_to_databuf(struct block_info *bi,
+    const struct mk_obs_info * p_oi,
+    const struct mk_feng_spead_info * p_fesi,
+    uint8_t * p_spead_payload)
+{
+  // Get pointer to data block (cast as a debug_data_block)
+  struct debug_data_block * ddb =
+    (struct debug_data_block *)block_info_data(bi);
+
+  // Get pointer to next ts_mk_feng_spead_info element
+  struct ts_mk_feng_spead_info * ts_fesi = &(ddb->ts_fesi[ddb->npkts]);
+
+  // Store timestamp
+  clock_gettime(CLOCK_MONOTONIC_RAW, &ts_fesi->ts);
+
+  // Copy mk_feng_spead_info
+  memcpy(&ts_fesi->fesi, p_fesi, sizeof(struct mk_feng_spead_info));
+
+  // Increment packet counter
+  ddb->npkts++;
+}
+#else
 // The copy_packet_data_to_databuf() function does what it says: copies packet
 // data into a data buffer.
 //
@@ -401,6 +435,7 @@ printf("\n");
     bytes_to_copy -= istride;
   }
 }
+#endif // debug vs real copy
 
 // Check the given pktidx value against the status buffer's PKTSTART/PKTSTOP
 // values. Logic goes something like this:
