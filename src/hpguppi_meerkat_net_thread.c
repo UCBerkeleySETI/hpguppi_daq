@@ -427,13 +427,13 @@ enum run_states check_start_stop(hashpipe_status_t *st, uint64_t pktidx)
         //
         //                        pktidx * hclocks
         //     realtime_secs = -----------------------
-        //                      2 * fenchan * chan_bw
+        //                      2e6 * fenchan * chan_bw
         if(fenchan * chan_bw != 0.0) {
-          realtime_secs = (pktidx * hclocks) / (2.0 * fenchan * chan_bw);
+          realtime_secs = (pktidx * hclocks) / (2e6 * fenchan * fabs(chan_bw));
         }
 
-        ts.tv_sec = (time_t)(synctime + floor(realtime_secs));
-        ts.tv_nsec = (long)(fmod(realtime_secs, 1) * 1e9);
+        ts.tv_sec = (time_t)(synctime + rint(realtime_secs));
+        ts.tv_nsec = (long)((realtime_secs - rint(realtime_secs)) * 1e9);
 
         get_mjd_from_timespec(&ts, &stt_imjd, &stt_smjd, &stt_offs);
 
