@@ -77,7 +77,7 @@
 
 
 #if 0
-// Return the beam FWHM in degrees for obs_freq in MHz 
+// Return the beam FWHM in degrees for obs_freq in MHz
 // and dish_diam in m
 double beam_FWHM(double obs_freq, double dish_diam)
 {
@@ -88,8 +88,8 @@ double beam_FWHM(double obs_freq, double dish_diam)
 
 
 // Any GB-specific derived parameters go here
-static void set_obs_params_gb(char *buf, 
-                              struct hpguppi_params *g, 
+static void set_obs_params_gb(char *buf,
+                              struct hpguppi_params *g,
                               struct psrfits *p) {
 
     // TODO could double-check telescope name first
@@ -98,7 +98,7 @@ static void set_obs_params_gb(char *buf,
     get_dbl("FD_SANG", p->hdr.fd_sang, 45.0);
     get_dbl("FD_XYPH", p->hdr.fd_xyph, 0.0);
     get_int("BE_PHASE", p->hdr.be_phase, -1);
-    get_dbl("BEAMFWHM", p->hdr.beam_FWHM, 65.0);  
+    get_dbl("BEAMFWHM", p->hdr.beam_FWHM, 65.0);
 }
 
 // Read networking parameters
@@ -148,8 +148,8 @@ void guppi_read_obs_mode(const char *buf, char *mode) {
 #endif // 0
 
 // Read a status buffer all of the key observation paramters
-void hpguppi_read_subint_params(char *buf, 
-                                struct hpguppi_params *g, 
+void hpguppi_read_subint_params(char *buf,
+                                struct hpguppi_params *g,
                                 struct psrfits *p)
 {
     // Parse packet size, # of packets, etc.
@@ -183,19 +183,19 @@ void hpguppi_read_subint_params(char *buf,
     get_int("PFB_OVER", g->pfb_overlap, 4);
     get_int("CODD", g->coherent, 0);
 
-    // Check fold mode 
+    // Check fold mode
     int fold=0;
     if (strstr("PSR", p->hdr.obs_mode)!=NULL) { fold=1; }
     if (strstr("CAL", p->hdr.obs_mode)!=NULL) { fold=1; }
 
     // Fold-specifc stuff
     if (fold) {
-        get_dbl("TSUBINT", p->sub.tsubint, 0.0); 
-        get_dbl("OFFS_SUB", p->sub.offs, 0.0); 
+        get_dbl("TSUBINT", p->sub.tsubint, 0.0);
+        get_dbl("OFFS_SUB", p->sub.offs, 0.0);
         get_int("NPOLYCO", p->fold.n_polyco_sets, 0);
     } else {
         int bytes_per_dt = p->hdr.nchan * p->hdr.npol * p->hdr.nbits / 8;
-        p->sub.offs = p->hdr.dt * 
+        p->sub.offs = p->hdr.dt *
             (double)(g->packetindex * g->packetsize / bytes_per_dt)
             + 0.5 * p->sub.tsubint;
         p->fold.n_polyco_sets = 0;
@@ -214,7 +214,7 @@ void hpguppi_read_subint_params(char *buf,
     p->sub.feed_ang = 0.0;
     p->sub.pos_ang = 0.0;
     p->sub.par_ang = 0.0;
-    
+
     // Galactic coords
     slaEqgal(p->sub.ra*DEGTORAD, p->sub.dec*DEGTORAD,
              &p->sub.glon, &p->sub.glat);
@@ -224,8 +224,8 @@ void hpguppi_read_subint_params(char *buf,
 
 
 // Read a status buffer all of the key observation paramters
-void hpguppi_read_obs_params(char *buf, 
-                             struct hpguppi_params *g, 
+void hpguppi_read_obs_params(char *buf,
+                             struct hpguppi_params *g,
                              struct psrfits *p)
 {
     char base[200], dir[200], banknam[64];
@@ -291,9 +291,9 @@ void hpguppi_read_obs_params(char *buf,
     if (strstr("FOLD", p->hdr.obs_mode)!=NULL) { fold=1; }
     if (strstr("PSR", p->hdr.obs_mode)!=NULL) { fold=1; }
     if (strstr("CAL", p->hdr.obs_mode)!=NULL) { fold=1; }
-    if (fold) 
+    if (fold)
         p->hdr.nbin = p->fold.nbin;
-    else 
+    else
         p->hdr.nbin = 1;
 
     // Coherent dedispersion params
@@ -301,7 +301,7 @@ void hpguppi_read_obs_params(char *buf,
     get_lon("PKTSTART", g->start_pkt, 0);
     get_int("OVERLAP", p->dedisp.overlap, 0);
     get_dbl("CHAN_DM", p->hdr.chan_dm, 0.0);
-    
+
     { // Start time, MJD
         int mjd_d, mjd_s;
         double mjd_fs;
@@ -313,16 +313,16 @@ void hpguppi_read_obs_params(char *buf,
         p->hdr.start_day = mjd_d;
         p->hdr.start_sec = mjd_s + mjd_fs;
     }
-    
+
     // Set the base filename
     int i;
     char backend[24];
     strncpy(backend, p->hdr.backend, 24);
-    for (i=0; i<24; i++) { 
+    for (i=0; i<24; i++) {
         if (backend[i]=='\0') break;
-        backend[i] = tolower(backend[i]); 
+        backend[i] = tolower(backend[i]);
     }
-    if (strstr("CAL", p->hdr.obs_mode)!=NULL) { 
+    if (strstr("CAL", p->hdr.obs_mode)!=NULL) {
         sprintf(base, "%s_%05d_%s_%04d_cal", backend, p->hdr.start_day,
                 p->hdr.source, p->hdr.scan_number);
     } else {
@@ -338,22 +338,22 @@ void hpguppi_read_obs_params(char *buf,
     // Use a $DATADIR/$PROJID/$BACKEND/$BANK prefix for files
     if (strnlen(banknam, sizeof(banknam)) < 1)
         snprintf(banknam, sizeof(banknam), ".");
-    sprintf(p->basefilename, "%s/%s/%s%s/%c/%s", dir, p->hdr.project_id, 
-            p->hdr.backend, g->coherent ? "_CODD" : "", 
+    sprintf(p->basefilename, "%s/%s/%s%s/%c/%s", dir, p->hdr.project_id,
+            p->hdr.backend, g->coherent ? "_CODD" : "",
             banknam[strnlen(banknam, sizeof(banknam))-1], base);
 #endif
     { // Date and time of start
         int YYYY, MM, DD, h, m;
         double s;
         datetime_from_mjd(p->hdr.MJD_epoch, &YYYY, &MM, &DD, &h, &m, &s);
-        sprintf(p->hdr.date_obs, "%04d-%02d-%02dT%02d:%02d:%06.3f", 
-                YYYY, MM, DD, h, m, s);
+        sprintf(p->hdr.date_obs, "%04d-%02d-%02dT%02d:%02d:%06.3f",
+                YYYY % 10000, MM % 100, DD % 100, h % 24, m % 60, s);
     }
 
     // TODO: call telescope-specific settings here
     // Eventually make this depend on telescope name
     set_obs_params_gb(buf, g, p);
-    
+
     // Now bookkeeping information
     {
         int ii, jj, kk;
@@ -366,10 +366,10 @@ void hpguppi_read_obs_params(char *buf,
         p->hdr.nsblk = p->sub.bytes_per_subint / bytes_per_dt;
         p->sub.FITS_typecode = TBYTE;
         p->sub.tsubint = p->hdr.nsblk * p->hdr.dt;
-        if (fold) { 
+        if (fold) {
             //p->hdr.nsblk = 1;
             p->sub.FITS_typecode = TFLOAT;
-            get_dbl("TSUBINT", p->sub.tsubint, 0.0); 
+            get_dbl("TSUBINT", p->sub.tsubint, 0.0);
             p->sub.bytes_per_subint = sizeof(float) * p->hdr.nbin *
                 p->hdr.nchan * p->hdr.npol;
             //max_bytes_per_file = PSRFITS_MAXFILELEN_FOLD * 1073741824L;
@@ -380,7 +380,7 @@ void hpguppi_read_obs_params(char *buf,
         // Will probably want to tweak this so that it is a nice round number
         if (p->sub.bytes_per_subint!=0)
             p->rows_per_file = p->hdr.ds_freq_fact * p->hdr.ds_time_fact *
-                (p->hdr.onlyI ? 4 : 1) * max_bytes_per_file / 
+                (p->hdr.onlyI ? 4 : 1) * max_bytes_per_file /
                 p->sub.bytes_per_subint;
 
         // Free the old ones in case we've changed the params
@@ -404,10 +404,10 @@ void hpguppi_read_obs_params(char *buf,
         // because of how power is split between them
         // XXX this needs to be changed for coherent dedisp..
         //p->sub.dat_weights[0] = 0.0;
-        
-        p->sub.dat_offsets = (float *)malloc(sizeof(float) *  
+
+        p->sub.dat_offsets = (float *)malloc(sizeof(float) *
                                              p->hdr.nchan * p->hdr.npol);
-        p->sub.dat_scales = (float *)malloc(sizeof(float) *  
+        p->sub.dat_scales = (float *)malloc(sizeof(float) *
                                             p->hdr.nchan * p->hdr.npol);
         for (ii = 0 ; ii < p->hdr.npol ; ii++) {
             sprintf(key, "OFFSET%d", ii);
@@ -420,7 +420,7 @@ void hpguppi_read_obs_params(char *buf,
             }
         }
     }
-    
+
     // Read information that is appropriate for the subints
     hpguppi_read_subint_params(buf, g, p);
     p->hdr.azimuth = p->sub.tel_az;
