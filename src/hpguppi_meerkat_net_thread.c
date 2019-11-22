@@ -1184,7 +1184,7 @@ int debug_i=0, debug_j=0;
         waiting=1;
       }
 
-    } while (!GOT_PACKET && run_threads()); // end wait for data loop
+    } while (!GOT_PACKET && run_threads() && state != IDLE); // end wait for data loop
 
     if(!run_threads()) {
       // We're outta here!
@@ -1196,6 +1196,9 @@ int debug_i=0, debug_j=0;
       hashpipe_pktsock_release_frame(p_frame);
 #endif // USE_IBVERBS
       break;
+    } else if(state == IDLE) {
+      // Go back to top of main loop
+      continue;
     }
 
     // Got packet(s)!  Update status if needed.
