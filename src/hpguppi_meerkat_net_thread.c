@@ -564,10 +564,11 @@ static int init(hashpipe_thread_args_t *args)
   int npol=4;
   double obsfreq=0;
   double obsbw=128.0;
+  double chan_bw=1.0;
   int obsnchan=1;
   int nants=1;
   int overlap=0;
-  double tbin=0.0;
+  double tbin=1e-6;
   char obs_mode[80];
   char dest_ip[80];
   char fifo_name[PATH_MAX];
@@ -620,6 +621,7 @@ char *pchar;
     hgeti4(st.buf, "NPOL", &npol);
     hgetr8(st.buf, "OBSFERQ", &obsfreq);
     hgetr8(st.buf, "OBSBW", &obsbw);
+    hgetr8(st.buf, "CHAN_BW", &chan_bw);
     hgeti4(st.buf, "OBSNCHAN", &obsnchan);
     hgeti4(st.buf, "OVERLAP", &overlap);
     hgets(st.buf, "OBS_MODE", 80, obs_mode);
@@ -631,13 +633,15 @@ if((pchar = strchr(dest_ip, '+'))) *pchar = '\0';
       nants = 1;
       hputi4(st.buf, "NANTS", nants);
     }
-    if(obsbw == 0) {
-      obsbw = 1.0;
-      hputr8(st.buf, "OBSBW", obsbw);
+
+    // If CHAN_BW is zero, set to default value (1 MHz)
+    if(chan_bw == 0.0) {
+      chan_bw = 1.0;
     }
 
-    // Calculate TBIN from OBSNCHAN and OBSBW
-    tbin = fabs(obsnchan / nants / obsbw) / 1e6;
+    // Calculate tbin and obsbw from chan_bw
+    tbin = 1e-6 / fabs(chan_bw);
+    obsbw = chan_bw * obsnchan / nants;
 
     // Store bind host/port info etc in status buffer (in case it was not there
     // before).
@@ -648,6 +652,7 @@ if((pchar = strchr(dest_ip, '+'))) *pchar = '\0';
     hputi4(st.buf, "NBITS", nbits);
     hputi4(st.buf, "NPOL", npol);
     hputr8(st.buf, "OBSBW", obsbw);
+    hputr8(st.buf, "CHAN_BW", chan_bw);
     hputi4(st.buf, "OBSNCHAN", obsnchan);
     hputi4(st.buf, "OVERLAP", overlap);
     // Force PKTFMT to be "SPEAD"
@@ -775,7 +780,8 @@ int debug_i=0, debug_j=0;
   //uint64_t nextblock_seq_num=0;
   uint64_t dwell_blocks = 0;
   double dwell_seconds = 300.0;
-  double tbin = 1.0; //TODO /PKSUWL_SAMPLES_PER_SEC;
+  double chan_bw = 1.0;
+  double tbin = 1.0e-6;
 
   // Heartbeat variables
   time_t lasttime = 0;
@@ -1249,7 +1255,16 @@ printf("\n");
           hputu8(st.buf, "PKTSTART", start_seq_num);
           hgetr8(st.buf, "DWELL", &dwell_seconds);
           hputr8(st.buf, "DWELL", dwell_seconds); // In case it wasn't there
-          hgetr8(st.buf, "TBIN", &tbin);
+
+          // Get CHAN_BW and calculate/store TBIN
+          hgetr8(st.buf, "CHAN_BW", &chan_bw);
+          // If CHAN_BW is zero, set to default value (1 MHz)
+          if(chan_bw == 0.0) {
+            chan_bw = 1.0;
+          }
+          tbin = 1e-6 / fabs(chan_bw);
+          hputr8(st.buf, "TBIN", tbin);
+
           // Dwell blocks is equal to:
           //
           //       dwell_seconds
