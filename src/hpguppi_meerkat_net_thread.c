@@ -52,7 +52,7 @@
 #define DEFAULT_MAX_PKT_SIZE (8400)
 #define DEFAULT_SEND_PKT_NUM (1)
 #define DEFAULT_RECV_PKT_NUM (16351)
-#define DEFAULT_MAX_FLOWS (1)
+#define DEFAULT_MAX_FLOWS (16)
 #else
 #include <net/if.h> // Fpr IFNAMSIZ
 // Sizes for pktsock.  Make frame_size be a multiple of page size so that
@@ -574,7 +574,6 @@ static int init(hashpipe_thread_args_t *args)
   char fifo_name[PATH_MAX];
   struct net_params * net_params;
   const char * status_key = args->thread_desc->skey;
-char *pchar;
 
   // Create control FIFO (/tmp/hpguppi_daq_control/$inst_id)
   int rv = mkdir(HPGUPPI_DAQ_CONTROL, 0777);
@@ -625,8 +624,6 @@ char *pchar;
     hgeti4(st.buf, "OBSNCHAN", &obsnchan);
     hgeti4(st.buf, "OVERLAP", &overlap);
     hgets(st.buf, "OBS_MODE", 80, obs_mode);
-    hgets(st.buf, "DESTIP", 80, dest_ip);
-if((pchar = strchr(dest_ip, '+'))) *pchar = '\0';
 
     // Prevent div-by-zero errors (should never happen...)
     if(nants == 0) {
@@ -721,7 +718,6 @@ int debug_i=0, debug_j=0;
   struct pollfd pollfd;
   char fifo_name[PATH_MAX];
   char fifo_cmd[MAX_CMD_LEN];
-  char * pchar;
   sprintf(fifo_name, "%s/%d", HPGUPPI_DAQ_CONTROL, args->instance_id);
   int fifo_fd = open(fifo_name, O_RDONLY | O_NONBLOCK);
   if (fifo_fd<0) {
@@ -745,8 +741,14 @@ int debug_i=0, debug_j=0;
   int rv;
   // String version of destination address
   char dest_ip_str[80] = {};
+  char * pchar;
   // Numeric form of dest_ip
   struct in_addr dest_ip;
+#ifndef USE_IBVERBS
+  struct in_addr dest_ip_tmp;
+#endif
+  int dest_idx;
+  int nstreams;
 
   // The incoming packets are placed in blocks that are eventually passed off
   // to the downstream thread.  We currently support two active blocks (aka
@@ -948,7 +950,6 @@ int debug_i=0, debug_j=0;
       {
         // Get DESTIP address and BINDPORT (a historical misnomer for DESTPORT)
         hgets(st.buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
-if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
         hgeti4(st.buf,  "BINDPORT", &net_params->port);
 
         hgetu4(st.buf, "FENCHAN", &obs_info.fenchan);
@@ -979,6 +980,21 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
       hashpipe_status_unlock_safe(&st);
 
       // TODO Parse the A.B.C.D+N notation
+      if((pchar = strchr(dest_ip_str, '+'))) {
+        // Null terminate dest_ip_str and point to N
+        *pchar = '\0';
+        pchar++;
+        nstreams = strtoul(pchar, NULL, 0);
+        nstreams++;
+#ifdef USE_IBVERBS
+        if(nstreams > hibv_ctx->max_flows) {
+          nstreams = hibv_ctx->max_flows;
+        }
+#endif // USE_IBVERBS
+      } else {
+        nstreams = 1;
+      }
+
       // If obs_info is valid and DESTIP is valid and non-zero, start
       // listening!  Valid here just means that it parses OK via inet_aton, not
       // that it is correct and actually usable.
@@ -987,30 +1003,49 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
           dest_ip.s_addr != INADDR_ANY) {
 
 #ifdef USE_IBVERBS
-        // Add flow and change state to listen
-        if(hashpipe_ibv_flow(hibv_ctx, 0, IBV_FLOW_SPEC_UDP,
-              hibv_ctx->mac, NULL, 0, 0,
-              0, ntohl(dest_ip.s_addr), 0, net_params->port))
-        {
-          hashpipe_error(
-              "hpguppi_meerkat_net_thread", "hashpipe_ibv_flow error");
+        // Add flow(s) and change state to listen
+        hashpipe_info("hpguppi_meerkat_net_thread", "dest_ip %s+%s flows", dest_ip_str, pchar ? pchar : "X");
+        hashpipe_info("hpguppi_meerkat_net_thread", "adding %d flows", nstreams);
+        for(dest_idx=0; dest_idx < nstreams; dest_idx++) {
+          if(hashpipe_ibv_flow(hibv_ctx, dest_idx, IBV_FLOW_SPEC_UDP,
+                hibv_ctx->mac, NULL, 0, 0,
+                0, ntohl(dest_ip.s_addr)+dest_idx, 0, net_params->port))
+          {
+            hashpipe_error(
+                "hpguppi_meerkat_net_thread", "hashpipe_ibv_flow error");
+            break;
+          }
+        }
+        // Check if all streams/flows were added successfully
+        if(dest_idx < nstreams) {
+          // TODO Remove flows that were added
           // Stay in IDLE state loop
           continue;
         }
 #else
-        // If multicast address
-        if((IN_MULTICAST(ntohl(dest_ip.s_addr)))) {
-          // IP_ADD_MEMBERSHIP
-          if(hpguppi_mcast_membership(mcast_subscriber,
-                net_params->ifname, IP_ADD_MEMBERSHIP, &dest_ip)) {
-            hashpipe_error("hpguppi_meerkat_net_thread",
-                "could not add mcast membership for group %s", dest_ip_str);
+        // If multicast address(es)
+        for(dest_idx=0; dest_idx < nstreams; dest_idx++) {
+          dest_ip_tmp.s_addr = htonl(ntohl(dest_ip.s_addr)+dest_idx);
+          if((IN_MULTICAST(ntohl(dest_ip_tmp.s_addr)))) {
+            // IP_ADD_MEMBERSHIP
+            if(hpguppi_mcast_membership(mcast_subscriber,
+                  net_params->ifname, IP_ADD_MEMBERSHIP, &dest_ip_tmp)) {
+              hashpipe_error("hpguppi_meerkat_net_thread",
+                  "could not add mcast membership for group %s+%d",
+                  dest_ip_str, dest_idx);
+              break;
+            }
+          }
+          // Check if all addresses were processed successfully
+          if(dest_idx < nstreams) {
+            // TODO Drop memberships that were added
             // Stay in IDLE state loop
             continue;
           }
-          // Remember multicast group
-          net_params->mcast_group.s_addr = dest_ip.s_addr;
         }
+        // Remember multicast group
+        // TODO Add nstreams field to remember nstreams?
+        net_params->mcast_group.s_addr = dest_ip.s_addr;
 #endif // USE_IBVERBS
 
         // Transition to LISTEN state and start waiting for packets
@@ -1077,7 +1112,7 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
 
           // Get DESTIP to see if we should go to IDLE state
           hgets(st.buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
-if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
+          if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
         }
         hashpipe_status_unlock_safe(&st);
 
@@ -1086,13 +1121,17 @@ if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
         // unusable.
         if(!inet_aton(dest_ip_str, &dest_ip) || dest_ip.s_addr == INADDR_ANY) {
 #ifdef USE_IBVERBS
-          // Remove flow and change state to listen
-          if(hashpipe_ibv_flow(hibv_ctx, 0, IBV_FLOW_SPEC_UDP,
-                0, 0, 0, 0, 0, 0, 0, 0))
-          {
-            hashpipe_error(
-                "hpguppi_meerkat_net_thread", "hashpipe_ibv_flow error");
+          // Remove flow(s) and change state to listen
+          hashpipe_info("hpguppi_meerkat_net_thread", "dest_ip %s (removing %d flows)", dest_ip_str, nstreams);
+          for(dest_idx=0; dest_idx < nstreams; dest_idx++) {
+            if(hashpipe_ibv_flow(hibv_ctx, dest_idx, IBV_FLOW_SPEC_UDP,
+                  0, 0, 0, 0, 0, 0, 0, 0))
+            {
+              hashpipe_error(
+                  "hpguppi_meerkat_net_thread", "hashpipe_ibv_flow error");
+            }
           }
+          nstreams = 0;
 #else
           // IP_DROP_MEMBERSHIP
           if(hpguppi_mcast_membership(mcast_subscriber,
