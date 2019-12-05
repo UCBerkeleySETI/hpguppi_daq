@@ -297,6 +297,7 @@ static void wait_for_block_free(const struct block_info * bi,
   char netstat[80];
   char netbuf_status[80];
   int netbuf_full = hpguppi_input_databuf_total_status(bi->db);
+  struct timespec ts_sleep = {0, 10 * 1000 * 1000}; // 10 ms
   sprintf(netbuf_status, "%d/%d", netbuf_full, bi->db->header.n_block);
   hashpipe_status_lock_safe(st);
   hgets(st->buf, status_key, sizeof(netstat), netstat);
@@ -328,6 +329,8 @@ static void wait_for_block_free(const struct block_info * bi,
   // TODO Just clear effective block size?
   //memset(block_info_data(bi), 0, BLOCK_DATA_SIZE);
   clear_memory(block_info_data(bi), BLOCK_DATA_SIZE);
+#else
+          nanosleep(&ts_sleep, NULL);
 #endif
 }
 
@@ -837,6 +840,7 @@ int debug_i=0, debug_j=0;
   struct timespec ts_start_proc, ts_stop_proc;
   uint64_t elapsed_proc = 0;
   uint64_t count_proc = 0;
+  struct timespec ts_sleep = {0, 10 * 1000 * 1000}; // 10 ms
 
   // Initialize working blocks
   for(wblk_idx=0; wblk_idx<2; wblk_idx++) {
@@ -1397,6 +1401,8 @@ printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_
           // TODO Move this out of net thread (takes too long)
           //memset(block_info_data(wblk+wblk_idx), 0, eff_block_size);
           clear_memory(block_info_data(wblk+wblk_idx), eff_block_size);
+#else
+          nanosleep(&ts_sleep, NULL);
 #endif
         }
 
