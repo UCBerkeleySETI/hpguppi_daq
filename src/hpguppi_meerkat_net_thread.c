@@ -796,7 +796,7 @@ int debug_i=0, debug_j=0;
   // Variables for counting packets and bytes.
   uint64_t packet_count = 0; // Counts packets between updates to status buffer
   uint64_t u64tmp = 0; // Used for status buffer interactions
-  uint64_t max_recvpkt_count = 0;
+  //uint64_t max_recvpkt_count = 0;
   uint64_t ndrop_total = 0;
   uint64_t nlate = 0;
 
@@ -831,15 +831,26 @@ int debug_i=0, debug_j=0;
   struct mk_feng_spead_info feng_spead_info = {0};
 
   // Variables for tracking timing stats
-  struct timespec ts_start_recv, ts_stop_recv;
-  uint64_t elapsed_recv = 0;
-  uint64_t count_recv = 0;
-  struct timespec ts_start_stat, ts_stop_stat;
-  uint64_t elapsed_stat = 0;
-  uint64_t count_stat = 0;
-  struct timespec ts_start_proc, ts_stop_proc;
-  uint64_t elapsed_proc = 0;
-  uint64_t count_proc = 0;
+  //
+  // ts_start_recv(N) to ts_stop_recv(N) is the time spent in the "receive" call.
+  // ts_stop_recv(N) to ts_start_recv(N+1) is the time spent processing received data.
+  struct timespec ts_start_recv = {0}, ts_stop_recv = {0};
+  struct timespec ts_prev_phys = {0}, ts_curr_phys = {0};
+
+  // We compute NETGBPS every block as (bits_processed_net / ns_processed_net)
+  // We compute NETPKPS every block as (1e9 * pkts_processed_net / ns_processed_net)
+  float netgbps = 0.0, netpkps = 0.0;
+  uint64_t bits_processed_net = 0;
+  uint64_t pkts_processed_net = 0;
+  uint64_t ns_processed_net = 0;
+
+  // We compute PHYSGBPS every second as (bits_processed_phys / ns_processed_phys)
+  // We compute PHYSPKPS every second as (1e9 * pkts_processed_phys / ns_processed_phys)
+  float physgbps = 0.0, physpkps = 0.0;
+  uint64_t bits_processed_phys = 0;
+  uint64_t pkts_processed_phys = 0;
+  uint64_t ns_processed_phys = 0;
+
   struct timespec ts_sleep = {0, 10 * 1000 * 1000}; // 10 ms
 
   // Initialize working blocks
@@ -1065,9 +1076,17 @@ int debug_i=0, debug_j=0;
       }
     } // end while state == IDLE
 
+    // Mark ts_stop_recv as unset
+    ts_stop_recv.tv_sec = 0;
+
     // Wait for data
     do {
       clock_gettime(CLOCK_MONOTONIC_RAW, &ts_start_recv);
+      // If ts_stop_recv has been set
+      if(ts_stop_recv.tv_sec != 0) {
+        // Accumulate processing time
+        ns_processed_net += ELAPSED_NS(ts_stop_recv, ts_start_recv);
+      }
 #ifdef USE_IBVERBS
 #define GOT_PACKET (hibv_rpkt)
       hibv_rpkt = hashpipe_ibv_recv_pkts(hibv_ctx, 1000); // 1 second timeout
@@ -1099,12 +1118,22 @@ int debug_i=0, debug_j=0;
       // Got packets or timeout
 
       // We perform some status buffer updates every second
-      clock_gettime(CLOCK_MONOTONIC_RAW, &ts_start_stat);
       time(&curtime);
       if(curtime != lasttime) {
         lasttime = curtime;
         ctime_r(&curtime, timestr);
         timestr[strlen(timestr)-1] = '\0'; // Chop off trailing newline
+
+        // Update PHYSGBPS and PHYSPKPS
+        clock_gettime(CLOCK_MONOTONIC_RAW, &ts_curr_phys);
+        if(ts_prev_phys.tv_sec != 0) {
+          ns_processed_phys = ELAPSED_NS(ts_prev_phys, ts_curr_phys);
+          physgbps = ((float)bits_processed_phys) / ns_processed_phys;
+          physpkps = ((float)pkts_processed_phys) / ns_processed_phys;
+          bits_processed_phys = 0;
+          pkts_processed_phys = 0;
+        }
+        ts_prev_phys = ts_curr_phys;
 
         hashpipe_status_lock_safe(&st);
         {
@@ -1113,6 +1142,9 @@ int debug_i=0, debug_j=0;
           hgetu8(st.buf, "NPKTS", &u64tmp);
           u64tmp += packet_count; packet_count = 0;
           hputu8(st.buf, "NPKTS", u64tmp);
+
+          hputr4(st.buf, "PHYSGBPS", physgbps);
+          hputr4(st.buf, "PHYSPKPS", physpkps);
 
           // Get DESTIP to see if we should go to IDLE state
           hgets(st.buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
@@ -1174,9 +1206,6 @@ int debug_i=0, debug_j=0;
           hashpipe_status_unlock_safe(&st);
         }
       } // curtime != lasttime
-      clock_gettime(CLOCK_MONOTONIC_RAW, &ts_stop_stat);
-      elapsed_stat += ELAPSED_NS(ts_start_stat, ts_stop_stat);
-      count_stat++;
 
       // Set status field to "waiting" if we are not getting packets
       if (!GOT_PACKET && run_threads() && state != IDLE && !waiting) {
@@ -1214,19 +1243,6 @@ int debug_i=0, debug_j=0;
       hashpipe_status_unlock_safe(&st);
       waiting=0;
     }
-
-    // Ignore first elapsed recv measurement as it includes wait time before
-    // transmission started assuming this is run in a controlled test
-    // environment where this thread is started, then blasted with packets,
-    // then idle).
-    if(max_recvpkt_count == 0){
-      elapsed_recv = 1;
-    } else {
-      elapsed_recv += ELAPSED_NS(ts_start_recv, ts_stop_recv);
-    }
-    count_recv++;
-
-    clock_gettime(CLOCK_MONOTONIC_RAW, &ts_start_proc);
 
 // IBVERBS can return multiple packets, so we need to loop over all of them.
 // PKTSOCK only returns one frame at a time, so no looping needed.
@@ -1266,8 +1282,12 @@ fflush(stdout);
         continue;
       }
 
-      // Count packet
+      // Count packet and the payload bits
       packet_count++;
+      pkts_processed_net++;
+      pkts_processed_phys++;
+      bits_processed_net += 8 * feng_spead_info.payload_size;
+      bits_processed_phys += 8 * feng_spead_info.payload_size;
 
       // Get packet index and absolute block number for packet
       pkt_seq_num = mk_pktidx(obs_info, feng_spead_info);
@@ -1291,16 +1311,31 @@ printf("\n");
       if(pkt_seq_num % pktidx_per_block == 0
           && pkt_seq_num != status_seq_num) {
         status_seq_num  = pkt_seq_num;
+
+        // Update NETGBPS and NETPKPS
+        if(ns_processed_net != 0) {
+          netgbps = ((float)bits_processed_net) / ns_processed_net;
+          netpkps = ((float)pkts_processed_net) / ns_processed_net;
+          bits_processed_net = 0;
+          pkts_processed_net = 0;
+          ns_processed_net = 0;
+        }
+
         hashpipe_status_lock_safe(&st);
         {
           hputi8(st.buf, "PKTIDX", pkt_seq_num);
           hputi8(st.buf, "PKTBLK", pkt_blk_num); // TODO do we want/need this?
           hputi4(st.buf, "BLOCSIZE", eff_block_size);
+
           hgetu8(st.buf, "PKTSTART", &start_seq_num);
           start_seq_num -= start_seq_num % pktidx_per_block;
           hputu8(st.buf, "PKTSTART", start_seq_num);
+
           hgetr8(st.buf, "DWELL", &dwell_seconds);
           hputr8(st.buf, "DWELL", dwell_seconds); // In case it wasn't there
+
+          hputr4(st.buf, "NETGBPS", netgbps);
+          hputr4(st.buf, "NETPKPS", netpkps);
 
           // Get CHAN_BW and calculate/store TBIN
           hgetr8(st.buf, "CHAN_BW", &chan_bw);
@@ -1343,22 +1378,6 @@ printf("\n");
           u64tmp += psdrps;
           hputu8(st.buf, "PSDRPS", u64tmp);
 #endif // !USE_IBVERBS
-
-#if 0
-          // Calculate receive speed in packets per second
-          hputi8(st.buf, "RECVNS", elapsed_recv);
-          hputi8(st.buf, "RECVPKTS", count_recv);
-          hputr4(st.buf, "RECVPPS", count_recv / (elapsed_recv/1e9));
-          elapsed_recv = 0;
-          count_recv = 0;
-#endif
-
-          // Calculate processing speed in packets per second
-          hputi8(st.buf, "PROCNS", elapsed_proc);
-          hputi8(st.buf, "PROCPKTS", count_proc);
-          hputr4(st.buf, "PROCPPS", count_proc / (elapsed_proc/1e9));
-          elapsed_proc = 0;
-          count_proc = 0;
         }
         hashpipe_status_unlock_safe(&st);
       } // End status buffer block update
@@ -1449,15 +1468,11 @@ printf("packet block: %ld   working blocks: %ld %lu\n", pkt_blk_num, wblk[0].blo
 
         // Count packet for block and for processing stats
         wblk[wblk_idx].npacket++;
-        count_proc++;
       }
 
 #ifdef USE_IBVERBS
     } // end for each packet
 #endif // USE_IBVERBS
-
-    clock_gettime(CLOCK_MONOTONIC_RAW, &ts_stop_proc);
-    elapsed_proc += ELAPSED_NS(ts_start_proc, ts_stop_proc);
 
     // Release packets
 #ifdef USE_IBVERBS
