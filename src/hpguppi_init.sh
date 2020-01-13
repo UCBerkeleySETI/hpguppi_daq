@@ -143,8 +143,6 @@ then
   # option by caller (e.g. hpguppi_pksuwl_init.sh)
   bindport=
   vlan='.2'
-  # For initial testing...
-  out_thread=null_output_thread
   shift
 elif [ "$1" = 'meerkat' ]
 then
