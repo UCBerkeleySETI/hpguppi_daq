@@ -884,7 +884,7 @@ static void * run(hashpipe_thread_args_t * args)
         waiting=1;
       }
 
-    } while (!GOT_PACKET && run_threads()); // end wait for data loop
+    } while (!GOT_PACKET && run_threads() && state != IDLE); // end wait for data loop
 
     if(!run_threads()) {
       // We're outta here!
@@ -896,6 +896,9 @@ static void * run(hashpipe_thread_args_t * args)
       hashpipe_pktsock_release_frame(p_frame);
 #endif // USE_IBVERBS
       break;
+    } else if(state == IDLE) {
+      // Go back to top of main loop
+      continue;
     }
 
     // Got packet(s)!  Update status if needed.
