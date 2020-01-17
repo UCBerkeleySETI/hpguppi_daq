@@ -1129,7 +1129,7 @@ int debug_i=0, debug_j=0;
         if(ts_prev_phys.tv_sec != 0) {
           ns_processed_phys = ELAPSED_NS(ts_prev_phys, ts_curr_phys);
           physgbps = ((float)bits_processed_phys) / ns_processed_phys;
-          physpkps = ((float)pkts_processed_phys) / ns_processed_phys;
+          physpkps = (1e9 * pkts_processed_phys) / ns_processed_phys;
           bits_processed_phys = 0;
           pkts_processed_phys = 0;
         }
@@ -1315,7 +1315,7 @@ printf("\n");
         // Update NETGBPS and NETPKPS
         if(ns_processed_net != 0) {
           netgbps = ((float)bits_processed_net) / ns_processed_net;
-          netpkps = ((float)pkts_processed_net) / ns_processed_net;
+          netpkps = (1e9 * pkts_processed_net) / ns_processed_net;
           bits_processed_net = 0;
           pkts_processed_net = 0;
           ns_processed_net = 0;
