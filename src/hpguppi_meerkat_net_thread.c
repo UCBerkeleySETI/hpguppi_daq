@@ -621,7 +621,7 @@ static int init(hashpipe_thread_args_t *args)
     hgeti4(st.buf, "NANTS", &nants);
     hgeti4(st.buf, "NBITS", &nbits);
     hgeti4(st.buf, "NPOL", &npol);
-    hgetr8(st.buf, "OBSFERQ", &obsfreq);
+    hgetr8(st.buf, "OBSFREQ", &obsfreq);
     hgetr8(st.buf, "OBSBW", &obsbw);
     hgetr8(st.buf, "CHAN_BW", &chan_bw);
     hgeti4(st.buf, "OBSNCHAN", &obsnchan);
@@ -965,7 +965,7 @@ int debug_i=0, debug_j=0;
       {
         // Get DESTIP address and BINDPORT (a historical misnomer for DESTPORT)
         hgets(st.buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
-        hgeti4(st.buf,  "BINDPORT", &net_params->port);
+        hgeti4(st.buf, "BINDPORT", &net_params->port);
 
         hgetu4(st.buf, "FENCHAN", &obs_info.fenchan);
         hgetu4(st.buf, "NANTS",   &obs_info.nants);
