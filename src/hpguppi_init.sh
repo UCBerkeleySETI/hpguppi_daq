@@ -149,7 +149,9 @@ elif [ "$1" = 'meerkat' ]
 then
   redis_sync_key=
   use_fifo=no
-  net_thread=hpguppi_meerkat_net_thread
+  #net_thread=hpguppi_meerkat_net_thread
+  #net_thread=hpguppi_meerkat_pkt_thread
+  net_thread="hpguppi_meerkat_pkt_thread -m 0xe000 hpguppi_meerkat_spead_thread"
   bindport=7148
   instances[0]="${instances[0]/datax/buf0}"
   instances[1]="${instances[1]/datax2/buf1}"
