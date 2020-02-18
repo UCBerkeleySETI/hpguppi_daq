@@ -153,15 +153,19 @@
 #include <endian.h>
 #include "hashpipe_packet.h"
 
-#define SPEAD_ID_IMM_IGNORE         (0x8000)
-#define SPEAD_ID_IMM_HEAP_COUNTER   (0x8001)
-#define SPEAD_ID_IMM_HEAP_SIZE      (0x8002)
-#define SPEAD_ID_IMM_HEAP_OFFSET    (0x8003)
-#define SPEAD_ID_IMM_PAYLOAD_SIZE   (0x8004)
-#define SPEAD_ID_IMM_TIMESTAMP      (0x9600)
-#define SPEAD_ID_IMM_FENG_ID        (0xc101)
-#define SPEAD_ID_IMM_FENG_CHAN      (0xc103)
-#define SPEAD_ID_IMM_PAYLOAD_OFFSET (0x4300)
+//                                     1111110000000000
+//                                     5432109876543210
+#define SPEAD_IMM_MASK              (0x0000ffffffffffffULL)
+#define SPEAD_ID_MASK               (0xffff000000000000ULL)
+#define SPEAD_ID_IMM_IGNORE         (0x8000000000000000ULL)
+#define SPEAD_ID_IMM_HEAP_COUNTER   (0x8001000000000000ULL)
+#define SPEAD_ID_IMM_HEAP_SIZE      (0x8002000000000000ULL)
+#define SPEAD_ID_IMM_HEAP_OFFSET    (0x8003000000000000ULL)
+#define SPEAD_ID_IMM_PAYLOAD_SIZE   (0x8004000000000000ULL)
+#define SPEAD_ID_IMM_TIMESTAMP      (0x9600000000000000ULL)
+#define SPEAD_ID_IMM_FENG_ID        (0xc101000000000000ULL)
+#define SPEAD_ID_IMM_FENG_CHAN      (0xc103000000000000ULL)
+#define SPEAD_ID_IMM_PAYLOAD_OFFSET (0x4300000000000000ULL)
 
 struct mk_feng_spead_info {
   uint64_t heap_counter;
@@ -228,18 +232,19 @@ mk_obs_info_valid(const struct mk_obs_info oi)
     (oi.schan   != MK_OBS_INFO_INVALID_SCHAN);
 }
 
+// Returns spead ID of item (NOT left shifted by 48 bits)
 static inline
-uint32_t
+uint64_t
 spead_id(uint64_t item)
 {
-  return ((item >> 48) & 0xffff);
+  return (item & SPEAD_ID_MASK);
 }
 
 static inline
 uint64_t
 spead_imm_value(uint64_t item)
 {
-  return item & ((1ULL<<48) - 1);
+  return (item & SPEAD_IMM_MASK);
 }
 
 static inline
