@@ -85,7 +85,7 @@ function init() {
     return 1
   fi
 
-  echo taskset $mask \
+  echo numactl --cpunodebind=1 --membind=1 \
   hashpipe -p ${hpguppi_plugin:-hpguppi_daq} -I $instance \
     -o BINDHOST=${bindhost}${vlan} \
     ${bindport:+-o BINDPORT=$bindport} \
@@ -94,7 +94,7 @@ function init() {
     -c $netcpu $net_thread \
     -c $outcpu $out_thread
 
-  taskset $mask \
+  numactl --cpunodebind=1 --membind=1 \
   hashpipe -p ${hpguppi_plugin:-hpguppi_daq} -I $instance \
     -o BINDHOST=${bindhost}${vlan} \
     ${bindport:+-o BINDPORT=$bindport} \
