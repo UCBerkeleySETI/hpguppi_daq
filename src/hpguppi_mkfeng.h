@@ -153,6 +153,22 @@
 #include <endian.h>
 #include "hashpipe_packet.h"
 
+// MeerKAT SPEAD packet with link layer header and internal padding to optimize
+// alignment.  The alignment is acheived through judicious use of IB Verbs
+// scatter/gather capabilities (specifically the scatter part).
+struct __attribute__ ((__packed__)) mk_ibv_spead_pkt {
+  struct ethhdr ethhdr;
+  struct iphdr iphdr;
+  struct udphdr udphdr;
+  uint8_t padding[22];
+  uint64_t spdhdr[16];
+	uint8_t payload[];
+};
+
+// The F engines send out 1024 bytes of payload per packet.  MAX_PKT_SIZE is
+// the next power of two that fits that plus non-payload bytes.
+#define MAX_PKT_SIZE (2048)
+
 //                                     1111110000000000
 //                                     5432109876543210
 #define SPEAD_IMM_MASK              (0x0000ffffffffffffULL)
@@ -420,6 +436,69 @@ mk_parse_mkfeng_packet(const struct udppkt *p, struct mk_feng_spead_info * fesi)
   }
 
   p_spead_payload = ((uint8_t *)p_spead) + offset;
+  return p_spead_payload;
+}
+
+// Parses a MeerKAT F Engine packet that is in the format of a "struct
+// mk_ibv_spead_pkt", stores metadata in fesi, returns pointer to packet's
+// spead payload.
+static inline
+const uint8_t *
+mk_parse_mkfeng_ibv_spead_packet(const struct mk_ibv_spead_pkt *p,
+    struct mk_feng_spead_info * fesi)
+{
+  uint32_t i;
+  uint64_t item;
+  const uint8_t * p_spead_payload;
+  const uint64_t * p_spead = p->spdhdr;
+  uint32_t nitems = be64toh(*p_spead++) & 0xffff;
+  //uint64_t offset = 0;
+
+  for(i=0; i<nitems; i++) {
+    item = be64toh(*p_spead++);
+    switch(spead_id(item)) {
+#if 0
+      case SPEAD_ID_IMM_HEAP_COUNTER:
+        fesi->heap_counter = spead_imm_value(item);
+        break;
+      case SPEAD_ID_IMM_HEAP_SIZE:
+        fesi->heap_size = spead_imm_value(item);
+        break;
+#endif
+      case SPEAD_ID_IMM_HEAP_OFFSET:
+        fesi->heap_offset = spead_imm_value(item);
+        break;
+      case SPEAD_ID_IMM_PAYLOAD_SIZE:
+        fesi->payload_size = spead_imm_value(item);
+        break;
+      case SPEAD_ID_IMM_TIMESTAMP:
+        fesi->timestamp = spead_imm_value(item);
+        break;
+      case SPEAD_ID_IMM_FENG_ID:
+        fesi->feng_id = spead_imm_value(item);
+        break;
+      case SPEAD_ID_IMM_FENG_CHAN:
+        fesi->feng_chan = spead_imm_value(item);
+        break;
+// Ignore payload offset.  It's always 0, but if this changes then a non-zero
+// value could cause a segfault due to misaligned addresses being used with AVX
+// intrinsics.
+#if 0
+      case SPEAD_ID_IMM_PAYLOAD_OFFSET:
+        offset = spead_imm_value(item);
+        break;
+#endif
+      default:
+        // Ignore
+        break;
+    }
+  }
+
+  p_spead_payload = p->payload
+#if 0
+    + offset
+#endif
+    ;
   return p_spead_payload;
 }
 
