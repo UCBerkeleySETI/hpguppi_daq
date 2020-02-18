@@ -64,6 +64,13 @@ static inline int hpguppi_input_databuf_total_status(hpguppi_input_databuf_t *d)
     return hashpipe_databuf_total_status((hashpipe_databuf_t *)d);
 }
 
+static inline int hpguppi_input_databuf_wait_free_timeout(
+    hpguppi_input_databuf_t *d, int block_id, struct timespec *timeout)
+{
+    return hashpipe_databuf_wait_free_timeout((hashpipe_databuf_t *)d,
+        block_id, timeout);
+}
+
 static inline int hpguppi_input_databuf_wait_free(hpguppi_input_databuf_t *d, int block_id)
 {
     return hashpipe_databuf_wait_free((hashpipe_databuf_t *)d, block_id);
@@ -72,6 +79,13 @@ static inline int hpguppi_input_databuf_wait_free(hpguppi_input_databuf_t *d, in
 static inline int hpguppi_input_databuf_busywait_free(hpguppi_input_databuf_t *d, int block_id)
 {
     return hashpipe_databuf_busywait_free((hashpipe_databuf_t *)d, block_id);
+}
+
+static inline int hpguppi_input_databuf_wait_filled_timeout(
+    hpguppi_input_databuf_t *d, int block_id, struct timespec *timeout)
+{
+    return hashpipe_databuf_wait_filled_timeout((hashpipe_databuf_t *)d,
+        block_id, timeout);
 }
 
 static inline int hpguppi_input_databuf_wait_filled(hpguppi_input_databuf_t *d, int block_id)
