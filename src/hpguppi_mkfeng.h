@@ -168,8 +168,10 @@
 #define SPEAD_ID_IMM_PAYLOAD_OFFSET (0x4300000000000000ULL)
 
 struct mk_feng_spead_info {
+#if 0
   uint64_t heap_counter;
   uint64_t heap_size;
+#endif
   uint64_t heap_offset;
   uint64_t payload_size;
   uint64_t timestamp;
@@ -385,12 +387,14 @@ mk_parse_mkfeng_packet(const struct udppkt *p, struct mk_feng_spead_info * fesi)
   for(i=0; i<nitems; i++) {
     item = be64toh(*p_spead++);
     switch(spead_id(item)) {
+#if 0
       case SPEAD_ID_IMM_HEAP_COUNTER:
         fesi->heap_counter = spead_imm_value(item);
         break;
       case SPEAD_ID_IMM_HEAP_SIZE:
         fesi->heap_size = spead_imm_value(item);
         break;
+#endif
       case SPEAD_ID_IMM_HEAP_OFFSET:
         fesi->heap_offset = spead_imm_value(item);
         break;
