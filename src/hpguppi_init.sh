@@ -112,6 +112,7 @@ net_thread=hpguppi_net_thread
 out_thread=hpguppi_rawdisk_thread
 bindport=60000
 vlan=
+use_fifo=yes
 
 if [ "$1" = 'fakefake' ]
 then
@@ -147,6 +148,7 @@ then
 elif [ "$1" = 'meerkat' ]
 then
   redis_sync_key=
+  use_fifo=no
   net_thread=hpguppi_meerkat_net_thread
   bindport=7148
   instances[0]="${instances[0]/datax/buf0}"
@@ -202,6 +204,8 @@ do
     then
       echo Instance $hostname/$instidx pid $!
       hashpipe_check_status -I $instidx -k SYNCTIME -i ${sync_time:-0}
+
+      test "$use_fifo" == "yes" || continue
 
       # Loop until control fifo exists, time out after 3 seconds
       timeout=3
