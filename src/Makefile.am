@@ -4,7 +4,8 @@ AM_CPPFLAGS     =
 AM_CPPFLAGS += -I"@HASHPIPE_INCDIR@"
 
 # AM_CFLAGS is used for all C compiles
-AM_CFLAGS = -ggdb -fPIC -O3 -Wall -Werror -fno-strict-aliasing -mavx
+AM_CFLAGS = -ggdb -fPIC -O3 -Wall -Werror -fno-strict-aliasing -mavx512f
+#AM_CFLAGS = -ggdb -fPIC -O0 -Wall -Werror -fno-strict-aliasing -mavx512f
 
 # Convenience variables to group source files
 hpguppi_databuf = hpguppi_databuf.h \
@@ -27,8 +28,10 @@ libsla_support = slalib.h sla.c f77.h
 hpguppi_threads = hpguppi_net_thread.c     \
 		  hpguppi_mb1_net_thread.c \
 		  hpguppi_mb128ch_net_thread.c \
-		  hpguppi_meerkat_net_thread.c  \
-		  hpguppi_pksuwl_net_thread.c  \
+		  hpguppi_meerkat_net_thread.c \
+		  hpguppi_meerkat_pkt_thread.c \
+		  hpguppi_meerkat_spead_thread.c \
+		  hpguppi_pksuwl_net_thread.c \
 		  hpguppi_rawdisk_thread.c \
 		  hpguppi_rawdisk_only_thread.c
 
