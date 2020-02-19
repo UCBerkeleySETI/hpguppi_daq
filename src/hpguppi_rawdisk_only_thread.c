@@ -88,6 +88,7 @@ static void *run(hashpipe_thread_args_t * args)
     // Our output buffer happens to be a hpguppi_input_databuf
     hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->ibuf;
     hashpipe_status_t st = args->st;
+    const char * thread_name = args->thread_desc->name;
     const char * status_key = args->thread_desc->skey;
 
     /* Read in general parameters */
@@ -105,7 +106,7 @@ static void *run(hashpipe_thread_args_t * args)
 
     /* Set I/O priority class for this thread to "real time" */
     if(ioprio_set(IOPRIO_WHO_PROCESS, 0, IOPRIO_PRIO_VALUE(IOPRIO_CLASS_RT, 7))) {
-      hashpipe_error("hpguppi_rawdisk_thread", "ioprio_set IOPRIO_CLASS_RT");
+      hashpipe_error(thread_name, "ioprio_set IOPRIO_CLASS_RT");
     }
 
     /* Loop */
@@ -199,11 +200,11 @@ static void *run(hashpipe_thread_args_t * args)
 		if(rv) {
 		    if(rv == -1) {
 			// system() call failed (e.g. fork() failed)
-			hashpipe_error("hpguppi_rawdisk_thread", "Error calling system(\"%s\")", cmd);
+			hashpipe_error(thread_name, "Error calling system(\"%s\")", cmd);
 		    } else {
 			// system call succeeded, but command failed
 			rv = WEXITSTATUS(rv); // Get exit code of command
-			hashpipe_error("hpguppi_rawdisk_thread", "\"%s\" returned exit code %d (%s)",
+			hashpipe_error(thread_name, "\"%s\" returned exit code %d (%s)",
 				cmd, rv, strerror(rv));
 		    }
 		    pthread_exit(NULL);
@@ -216,7 +217,7 @@ static void *run(hashpipe_thread_args_t * args)
             }
             fdraw = open(fname, open_flags, 0644);
             if (fdraw==-1) {
-                hashpipe_error("hpguppi_rawdisk_thread", "Error opening file.");
+                hashpipe_error(thread_name, "Error opening file.");
                 pthread_exit(NULL);
             }
 
@@ -236,7 +237,7 @@ static void *run(hashpipe_thread_args_t * args)
             fprintf(stderr, "Opening raw file '%s' (directio=%d)\n", fname, directio);
             fdraw = open(fname, open_flags, 0644);
             if (fdraw==-1) {
-                hashpipe_error("hpguppi_rawdisk_thread", "Error opening file.");
+                hashpipe_error(thread_name, "Error opening file.");
                 pthread_exit(NULL);
             }
             block_count=0;
@@ -251,7 +252,7 @@ static void *run(hashpipe_thread_args_t * args)
         /* If we got packet 0, write data to disk */
         if (got_packet_0) {
 
-            /* Note waiting status */
+            /* Note writing status */
             hashpipe_status_lock_safe(&st);
             hputs(st.buf, status_key, "writing");
             hashpipe_status_unlock_safe(&st);
@@ -281,10 +282,9 @@ static void *run(hashpipe_thread_args_t * args)
             rv = write_all(fdraw, ptr, len);
             if (rv != len) {
                 char msg[100];
-                perror("hpguppi_rawdisk_thread write_all header");
+                perror(thread_name);
                 sprintf(msg, "Error writing data (ptr=%p, len=%d, rv=%d)", ptr, len, rv);
-                hashpipe_error("hpguppi_rawdisk_thread", msg);
-                        //"Error writing data.");
+                hashpipe_error(thread_name, msg);
             }
 
             /* Write data */
@@ -297,10 +297,9 @@ static void *run(hashpipe_thread_args_t * args)
             rv = write_all(fdraw, ptr, (size_t)len);
             if (rv != len) {
                 char msg[100];
-                perror("hpguppi_rawdisk_thread write_all block");
+                perror(thread_name);
                 sprintf(msg, "Error writing data (ptr=%p, len=%d, rv=%d)", ptr, len, rv);
-                hashpipe_error("hpguppi_rawdisk_thread", msg);
-                        //"Error writing data.");
+                hashpipe_error(thread_name, msg);
             }
 
 	    if(!directio) {
@@ -323,6 +322,7 @@ static void *run(hashpipe_thread_args_t * args)
 
     }
 
+    hashpipe_info(thread_name, "exiting!");
     pthread_exit(NULL);
 
     pthread_cleanup_pop(0); /* Closes safe_close */

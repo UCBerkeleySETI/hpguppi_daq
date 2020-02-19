@@ -838,6 +838,7 @@ int debug_i=0, debug_j=0;
   }
   hashpipe_status_unlock_safe(&st);
 
+  hashpipe_info(thread_name, "exiting!");
   pthread_exit(NULL);
 
   return NULL;

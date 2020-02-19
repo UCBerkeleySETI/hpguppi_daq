@@ -1165,13 +1165,12 @@ int debug_i=0, debug_j=0;
         // unusable.
         if(!inet_aton(dest_ip_str, &dest_ip) || dest_ip.s_addr == INADDR_ANY) {
           // Remove flow(s) and change state to listen
-          hashpipe_info("hpguppi_meerkat_spead_thread", "dest_ip %s (removing %d flows)", dest_ip_str, nstreams);
+          hashpipe_info(thread_name, "dest_ip %s (removing %d flows)", dest_ip_str, nstreams);
           for(dest_idx=0; dest_idx < nstreams; dest_idx++) {
             if(hashpipe_ibv_flow(hibv_ctx, dest_idx, IBV_FLOW_SPEC_UDP,
                   0, 0, 0, 0, 0, 0, 0, 0))
             {
-              hashpipe_error(
-                  "hpguppi_meerkat_spead_thread", "hashpipe_ibv_flow error");
+              hashpipe_error(thread_name, "hashpipe_ibv_flow error");
             }
           }
           nstreams = 0;
@@ -1214,6 +1213,8 @@ int debug_i=0, debug_j=0;
         waiting=1;
       }
 
+      // Will exit if thread has been cancelled
+      pthread_testcancel();
     } while (rv && run_threads()); // end wait for data loop
 
     if(!run_threads()) {
@@ -1407,7 +1408,7 @@ printf("next block (%ld == %ld + 1)\n", pkt_blk_num, wblk[1].block_num);
 printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_num, wblk[1].block_num);
 #endif
         // Should only happen when transitioning into LISTEN, so warn about it
-        hashpipe_warn("hpguppi_meerkat_spead_thread",
+        hashpipe_warn(thread_name,
             "working blocks reinit due to packet discontinuity (PKTIDX %lu)",
             pkt_seq_num);
 
@@ -1442,7 +1443,7 @@ printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_
         nlate++;
 #if 0
         // Should "never" happen, so warn about it
-        hashpipe_warn("hpguppi_meerkat_spead_thread",
+        hashpipe_warn(thread_name,
             "ignoring late packet (PKTIDX %lu)",
             pkt_seq_num);
 #endif
@@ -1522,6 +1523,7 @@ printf("packet block: %ld   working blocks: %ld %lu\n", pkt_blk_num, wblk[0].blo
     pthread_testcancel();
   } // end main loop
 
+  hashpipe_info(thread_name, "exiting!");
   pthread_exit(NULL);
 
   return NULL;

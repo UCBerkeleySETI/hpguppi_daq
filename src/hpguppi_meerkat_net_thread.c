@@ -675,6 +675,7 @@ int debug_i=0, debug_j=0;
   // Our output buffer happens to be a hpguppi_input_databuf
   hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->obuf;
   hashpipe_status_t st = args->st;
+  const char * thread_name = args->thread_desc->name;
   const char * status_key = args->thread_desc->skey;
 
   // Get a pointer to the net_params structure allocated and initialized in
@@ -689,7 +690,7 @@ int debug_i=0, debug_j=0;
   sprintf(fifo_name, "%s/%d", HPGUPPI_DAQ_CONTROL, args->instance_id);
   int fifo_fd = open(fifo_name, O_RDONLY | O_NONBLOCK);
   if (fifo_fd<0) {
-      hashpipe_error("hpguppi_meerkat_net_thread", "Error opening control fifo)");
+      hashpipe_error(thread_name, "Error opening control fifo)");
       pthread_exit(NULL);
   }
   pollfd.fd = fifo_fd;
@@ -871,11 +872,11 @@ int debug_i=0, debug_j=0;
 
   // Initialize ibverbs
   if(hashpipe_ibv_init(hibv_ctx)) {
-    hashpipe_error("hpguppi_meerkat_net_thread", "Error initializing ibverbs.");
+    hashpipe_error(thread_name, "Error initializing ibverbs.");
     return NULL;
   }
 
-  hashpipe_info(args->thread_desc->name, "recv_pkt_num=%u max_flows=%u num_qp=%u",
+  hashpipe_info(thread_name, "recv_pkt_num=%u max_flows=%u num_qp=%u",
       hibv_ctx->recv_pkt_num, hibv_ctx->max_flows, hibv_ctx->nqp);
 
   // Main loop
@@ -892,11 +893,10 @@ int debug_i=0, debug_j=0;
           if((pchar = strchr(fifo_cmd, '\n'))) {
             *pchar = '\0';
           }
-          hashpipe_warn("hpguppi_meerkat_net_thread",
-              "ignoring %s command", fifo_cmd);
+          hashpipe_warn(thread_name, "ignoring %s command", fifo_cmd);
         }
       } else if(rv < 0) {
-        hashpipe_error("hpguppi_meerkat_net_thread", "command fifo poll error");
+        hashpipe_error(thread_name, "command fifo poll error");
         // Bail out (this should "never" happen)
         break;
       }
@@ -965,15 +965,14 @@ int debug_i=0, debug_j=0;
           dest_ip.s_addr != INADDR_ANY) {
 
         // Add flow(s) and change state to listen
-        hashpipe_info("hpguppi_meerkat_net_thread", "dest_ip %s+%s flows", dest_ip_str, pchar ? pchar : "X");
-        hashpipe_info("hpguppi_meerkat_net_thread", "adding %d flows", nstreams);
+        hashpipe_info(thread_name, "dest_ip %s+%s flows", dest_ip_str, pchar ? pchar : "X");
+        hashpipe_info(thread_name, "adding %d flows", nstreams);
         for(dest_idx=0; dest_idx < nstreams; dest_idx++) {
           if(hashpipe_ibv_flow(hibv_ctx, dest_idx, IBV_FLOW_SPEC_UDP,
                 hibv_ctx->mac, NULL, 0, 0,
                 0, ntohl(dest_ip.s_addr)+dest_idx, 0, net_params->port))
           {
-            hashpipe_error(
-                "hpguppi_meerkat_net_thread", "hashpipe_ibv_flow error");
+            hashpipe_error(thread_name, "hashpipe_ibv_flow error");
             break;
           }
         }
@@ -995,6 +994,9 @@ int debug_i=0, debug_j=0;
         }
         hashpipe_status_unlock_safe(&st);
       }
+
+      // Will exit if thread has been cancelled
+      pthread_testcancel();
     } // end while state == IDLE
 
     // Mark ts_stop_recv as unset
@@ -1068,13 +1070,12 @@ int debug_i=0, debug_j=0;
         // unusable.
         if(!inet_aton(dest_ip_str, &dest_ip) || dest_ip.s_addr == INADDR_ANY) {
           // Remove flow(s) and change state to listen
-          hashpipe_info("hpguppi_meerkat_net_thread", "dest_ip %s (removing %d flows)", dest_ip_str, nstreams);
+          hashpipe_info(thread_name, "dest_ip %s (removing %d flows)", dest_ip_str, nstreams);
           for(dest_idx=0; dest_idx < nstreams; dest_idx++) {
             if(hashpipe_ibv_flow(hibv_ctx, dest_idx, IBV_FLOW_SPEC_UDP,
                   0, 0, 0, 0, 0, 0, 0, 0))
             {
-              hashpipe_error(
-                  "hpguppi_meerkat_net_thread", "hashpipe_ibv_flow error");
+              hashpipe_error(thread_name, "hashpipe_ibv_flow error");
             }
           }
           nstreams = 0;
@@ -1116,6 +1117,8 @@ int debug_i=0, debug_j=0;
         waiting=1;
       }
 
+      // Will exit if thread has been cancelled
+      pthread_testcancel();
     } while (!GOT_PACKET && run_threads() && state != IDLE); // end wait for data loop
 
     if(!run_threads()) {
@@ -1281,7 +1284,7 @@ printf("next block (%ld == %ld + 1)\n", pkt_blk_num, wblk[1].block_num);
 printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_num, wblk[1].block_num);
 #endif
         // Should only happen when transitioning into LISTEN, so warn about it
-        hashpipe_warn("hpguppi_meerkat_net_thread",
+        hashpipe_warn(thread_name,
             "working blocks reinit due to packet discontinuity (PKTIDX %lu)",
             pkt_seq_num);
         // Re-init working blocks for block number *after* current packet's block
@@ -1311,9 +1314,8 @@ printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_
         nlate++;
 #if 0
         // Should "never" happen, so warn anbout it
-        hashpipe_warn("hpguppi_meerkat_net_thread",
-            "ignoring late packet (PKTIDX %lu)",
-            pkt_seq_num);
+        hashpipe_warn(thread_name,
+            "ignoring late packet (PKTIDX %lu)", pkt_seq_num);
 #endif
       }
 
@@ -1355,6 +1357,7 @@ printf("packet block: %ld   working blocks: %ld %lu\n", pkt_blk_num, wblk[0].blo
     pthread_testcancel();
   } // end main loop
 
+  hashpipe_info(thread_name, "exiting!");
   pthread_exit(NULL);
 
   return NULL;
