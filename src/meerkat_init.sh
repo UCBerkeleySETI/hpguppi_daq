@@ -16,7 +16,14 @@ obsfreq="1420"
 obsnchan=$((hnchan * nstrm * nants))
 hclocks=2097152
 
-$(dirname $0)/hpguppi_init.sh meerkat 0 \
+perf=
+if [ "$1" = 'perf' ]
+then
+  perf=perf
+  shift
+fi
+
+$(dirname $0)/hpguppi_init.sh $perf meerkat 0 \
   -o DESTIP="0.0.0.0" \
   -o FENCHAN=${fenchan} \
   -o NANTS=${nants} \

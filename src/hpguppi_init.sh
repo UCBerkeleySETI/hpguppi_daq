@@ -86,6 +86,7 @@ function init() {
   fi
 
   echo numactl --cpunodebind=1 --membind=1 \
+  $perf \
   hashpipe -p ${hpguppi_plugin:-hpguppi_daq} -I $instance \
     -o BINDHOST=${bindhost}${vlan} \
     ${bindport:+-o BINDPORT=$bindport} \
@@ -95,6 +96,7 @@ function init() {
     -c $outcpu $out_thread
 
   numactl --cpunodebind=1 --membind=1 \
+  $perf \
   hashpipe -p ${hpguppi_plugin:-hpguppi_daq} -I $instance \
     -o BINDHOST=${bindhost}${vlan} \
     ${bindport:+-o BINDPORT=$bindport} \
@@ -107,12 +109,19 @@ function init() {
     2> ${hostname}.$instance.err &
 }
 
+perf=
 redis_sync_key=sync_time
 net_thread=hpguppi_net_thread
 out_thread=hpguppi_rawdisk_thread
 bindport=60000
 vlan=
 use_fifo=yes
+
+if [ "$1" = 'perf' ]
+then
+  perf="perf record"
+  shift
+fi
 
 if [ "$1" = 'fakefake' ]
 then
