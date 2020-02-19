@@ -285,9 +285,9 @@ static int init(hashpipe_thread_args_t *args)
     hputu4(st.buf, "MAXFLOWS", hibv_ctx->max_flows);
 
     hputu8(st.buf, "PKTPKTS", 0);
-    // PKTBLK is the absolute block number of the next block to be marked
+    // PKTBLKIN is the absolute block number of the next block to be marked
     // filled.
-    hputu8(st.buf, "PKTBLK", 0);
+    hputu8(st.buf, "PKTBLKIN", 0);
     // Set status_key to init
     hputs(st.buf, status_key, "init");
   }
@@ -648,7 +648,7 @@ int debug_i=0, debug_j=0;
       // Update status buffer fields, get dest_ip
       hashpipe_status_lock_safe(&st);
       {
-        hputu8(st.buf, "PKTBLK", curblk);
+        hputu8(st.buf, "PKTBLKIN", curblk);
         hputs(st.buf, "PKTBUFST", pktbuf_status);
         hputu8(st.buf, "PKTPKTS", packet_count);
 
@@ -804,10 +804,10 @@ int debug_i=0, debug_j=0;
         // Wait for curblk+2 to be free
         wait_for_block_free(db, (curblk+2) % N_INPUT_BLOCKS, &st, status_key);
 
-        // Update PKTBLK/PKTPKTS in status buffer
+        // Update PKTBLKIN/PKTPKTS in status buffer
         hashpipe_status_lock_safe(&st);
         {
-          hputu8(st.buf, "PKTBLK", curblk);
+          hputu8(st.buf, "PKTBLKIN", curblk);
 
 #if 0
           hgetu8(st.buf, "PKTPKTS", &u64tmp);
