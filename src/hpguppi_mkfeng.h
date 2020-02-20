@@ -172,16 +172,17 @@ struct __attribute__ ((__packed__)) mk_ibv_spead_pkt {
 //                                     1111110000000000
 //                                     5432109876543210
 #define SPEAD_IMM_MASK              (0x0000ffffffffffffULL)
-#define SPEAD_ID_MASK               (0xffff000000000000ULL)
-#define SPEAD_ID_IMM_IGNORE         (0x8000000000000000ULL)
-#define SPEAD_ID_IMM_HEAP_COUNTER   (0x8001000000000000ULL)
-#define SPEAD_ID_IMM_HEAP_SIZE      (0x8002000000000000ULL)
-#define SPEAD_ID_IMM_HEAP_OFFSET    (0x8003000000000000ULL)
-#define SPEAD_ID_IMM_PAYLOAD_SIZE   (0x8004000000000000ULL)
-#define SPEAD_ID_IMM_TIMESTAMP      (0x9600000000000000ULL)
-#define SPEAD_ID_IMM_FENG_ID        (0xc101000000000000ULL)
-#define SPEAD_ID_IMM_FENG_CHAN      (0xc103000000000000ULL)
-#define SPEAD_ID_IMM_PAYLOAD_OFFSET (0x4300000000000000ULL)
+
+// Byte reversed!!!
+#define SPEAD_ID_IMM_IGNORE         (0x0080)
+#define SPEAD_ID_IMM_HEAP_COUNTER   (0x0180)
+#define SPEAD_ID_IMM_HEAP_SIZE      (0x0280)
+#define SPEAD_ID_IMM_HEAP_OFFSET    (0x0380)
+#define SPEAD_ID_IMM_PAYLOAD_SIZE   (0x0480)
+#define SPEAD_ID_IMM_TIMESTAMP      (0x0096)
+#define SPEAD_ID_IMM_FENG_ID        (0x01c1)
+#define SPEAD_ID_IMM_FENG_CHAN      (0x03c1)
+#define SPEAD_ID_IMM_PAYLOAD_OFFSET (0x0043)
 
 struct mk_feng_spead_info {
 #if 0
@@ -248,14 +249,6 @@ mk_obs_info_valid(const struct mk_obs_info oi)
     (oi.hnchan  != 0) &&
     (oi.hclocks != 0) &&
     (oi.schan   != MK_OBS_INFO_INVALID_SCHAN);
-}
-
-// Returns spead ID of item (NOT left shifted by 48 bits)
-static inline
-uint64_t
-spead_id(uint64_t item)
-{
-  return (item & SPEAD_ID_MASK);
 }
 
 static inline
@@ -393,41 +386,41 @@ static inline
 uint8_t *
 mk_parse_mkfeng_packet(const struct udppkt *p, struct mk_feng_spead_info * fesi)
 {
-  uint32_t i;
-  uint64_t item;
+  uint16_t i;
+  uint16_t id;
   uint8_t * p_spead_payload;
   uint64_t * p_spead = (uint64_t *)p->payload;
-  uint32_t nitems = be64toh(*p_spead++) & 0xffff;
+  uint16_t nitems = ntohs(((uint16_t *)(p_spead++))[3]);
   uint64_t offset = 0;
 
-  for(i=0; i<nitems; i++) {
-    item = be64toh(*p_spead++);
-    switch(spead_id(item)) {
+  for(i=0; i<nitems; i++, p_spead++) {
+    id = *(uint16_t *)p_spead;
+    switch(id) {
 #if 0
       case SPEAD_ID_IMM_HEAP_COUNTER:
-        fesi->heap_counter = spead_imm_value(item);
+        fesi->heap_counter = spead_imm_value(be64toh(*p_spead));
         break;
       case SPEAD_ID_IMM_HEAP_SIZE:
-        fesi->heap_size = spead_imm_value(item);
+        fesi->heap_size = spead_imm_value(be64toh(*p_spead));
         break;
 #endif
       case SPEAD_ID_IMM_HEAP_OFFSET:
-        fesi->heap_offset = spead_imm_value(item);
+        fesi->heap_offset = spead_imm_value(be64toh(*p_spead));
         break;
       case SPEAD_ID_IMM_PAYLOAD_SIZE:
-        fesi->payload_size = spead_imm_value(item);
+        fesi->payload_size = spead_imm_value(be64toh(*p_spead));
         break;
       case SPEAD_ID_IMM_TIMESTAMP:
-        fesi->timestamp = spead_imm_value(item);
+        fesi->timestamp = spead_imm_value(be64toh(*p_spead));
         break;
       case SPEAD_ID_IMM_FENG_ID:
-        fesi->feng_id = spead_imm_value(item);
+        fesi->feng_id = spead_imm_value(be64toh(*p_spead));
         break;
       case SPEAD_ID_IMM_FENG_CHAN:
-        fesi->feng_chan = spead_imm_value(item);
+        fesi->feng_chan = spead_imm_value(be64toh(*p_spead));
         break;
       case SPEAD_ID_IMM_PAYLOAD_OFFSET:
-        offset = spead_imm_value(item);
+        offset = spead_imm_value(be64toh(*p_spead));
         break;
       default:
         // Ignore
@@ -447,45 +440,45 @@ const uint8_t *
 mk_parse_mkfeng_ibv_spead_packet(const struct mk_ibv_spead_pkt *p,
     struct mk_feng_spead_info * fesi)
 {
-  uint32_t i;
-  uint64_t item;
+  uint16_t i;
+  uint16_t id;
   const uint8_t * p_spead_payload;
   const uint64_t * p_spead = p->spdhdr;
-  uint32_t nitems = be64toh(*p_spead++) & 0xffff;
+  uint16_t nitems = ntohs(((uint16_t *)(p_spead++))[3]);
   //uint64_t offset = 0;
 
-  for(i=0; i<nitems; i++) {
-    item = be64toh(*p_spead++);
-    switch(spead_id(item)) {
+  for(i=0; i<nitems; i++, p_spead++) {
+    id = *(uint16_t *)p_spead;
+    switch(id) {
 #if 0
       case SPEAD_ID_IMM_HEAP_COUNTER:
-        fesi->heap_counter = spead_imm_value(item);
+        fesi->heap_counter = spead_imm_value(be64toh(*p_spead));
         break;
       case SPEAD_ID_IMM_HEAP_SIZE:
-        fesi->heap_size = spead_imm_value(item);
+        fesi->heap_size = spead_imm_value(be64toh(*p_spead));
         break;
 #endif
       case SPEAD_ID_IMM_HEAP_OFFSET:
-        fesi->heap_offset = spead_imm_value(item);
+        fesi->heap_offset = spead_imm_value(be64toh(*p_spead));
         break;
       case SPEAD_ID_IMM_PAYLOAD_SIZE:
-        fesi->payload_size = spead_imm_value(item);
+        fesi->payload_size = spead_imm_value(be64toh(*p_spead));
         break;
       case SPEAD_ID_IMM_TIMESTAMP:
-        fesi->timestamp = spead_imm_value(item);
+        fesi->timestamp = spead_imm_value(be64toh(*p_spead));
         break;
       case SPEAD_ID_IMM_FENG_ID:
-        fesi->feng_id = spead_imm_value(item);
+        fesi->feng_id = spead_imm_value(be64toh(*p_spead));
         break;
       case SPEAD_ID_IMM_FENG_CHAN:
-        fesi->feng_chan = spead_imm_value(item);
+        fesi->feng_chan = spead_imm_value(be64toh(*p_spead));
         break;
 // Ignore payload offset.  It's always 0, but if this changes then a non-zero
 // value could cause a segfault due to misaligned addresses being used with AVX
 // intrinsics.
 #if 0
       case SPEAD_ID_IMM_PAYLOAD_OFFSET:
-        offset = spead_imm_value(item);
+        offset = spead_imm_value(be64toh(*p_spead));
         break;
 #endif
       default:
