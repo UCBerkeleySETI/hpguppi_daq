@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <errno.h>
 
 #include "ioprio.h"
 
@@ -31,6 +32,50 @@ static const char BACKEND_RECORD[] =
 #ifndef DEBUG_RAWSPEC_CALLBACKS
 #define DEBUG_RAWSPEC_CALLBACKS (0)
 #endif
+
+static
+int
+mkdir_p(char *pathname, mode_t mode)
+{
+  char *p = pathname;
+
+  if(!pathname) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  // If absolute path is given, move past leading '/'
+  if(*p == '/') {
+    p++;
+  }
+
+  // Find first (non-root) slash, if any
+  p = strchr(p, '/');
+
+  // Make sure all parent diretories exist
+  while(p && *p) {
+    // NUL terminate at '/'
+    *p = '\0';
+
+    // Make directory, ignore EEXIST errors
+    if(mkdir(pathname, mode) && errno != EEXIST) {
+      return -1;
+    }
+
+    // Restore '/' and advance p to next character
+    *p++ = '/';
+
+    // Find next slash
+    p = strchr(p, '/');
+  }
+
+  // Make directory, ignore EEXIST errors
+  if(mkdir(pathname, mode) && errno != EEXIST) {
+    return -1;
+  }
+
+  return 0;
+}
 
 static ssize_t write_all(int fd, const void *buf, size_t bytes_to_write)
 {
@@ -186,7 +231,7 @@ static void *run(hashpipe_thread_args_t * args)
             directio = hpguppi_read_directio_mode(ptr);
             char fname[256];
             sprintf(fname, "%s.%04d.raw", pf.basefilename, filenum);
-            fprintf(stderr, "Opening raw file '%s' (directio=%d)\n", fname, directio);
+            fprintf(stderr, "Opening first raw file '%s' (directio=%d)\n", fname, directio);
             // Create the output directory if needed
             char datadir[1024];
             strncpy(datadir, pf.basefilename, 1023);
@@ -194,21 +239,7 @@ static void *run(hashpipe_thread_args_t * args)
             if (last_slash!=NULL && last_slash!=datadir) {
                 *last_slash = '\0';
                 printf("Using directory '%s' for output.\n", datadir);
-                char cmd[1024];
-                sprintf(cmd, "mkdir -m 1777 -p %s", datadir);
-                rv = system(cmd);
-		if(rv) {
-		    if(rv == -1) {
-			// system() call failed (e.g. fork() failed)
-			hashpipe_error(thread_name, "Error calling system(\"%s\")", cmd);
-		    } else {
-			// system call succeeded, but command failed
-			rv = WEXITSTATUS(rv); // Get exit code of command
-			hashpipe_error(thread_name, "\"%s\" returned exit code %d (%s)",
-				cmd, rv, strerror(rv));
-		    }
-		    pthread_exit(NULL);
-		}
+		mkdir_p(datadir, 01777);
             }
             // TODO: check for file exist.
             open_flags = O_CREAT|O_RDWR|O_SYNC;
@@ -234,7 +265,7 @@ static void *run(hashpipe_thread_args_t * args)
             if(directio) {
               open_flags |= O_DIRECT;
             }
-            fprintf(stderr, "Opening raw file '%s' (directio=%d)\n", fname, directio);
+            fprintf(stderr, "Opening next raw file '%s' (directio=%d)\n", fname, directio);
             fdraw = open(fname, open_flags, 0644);
             if (fdraw==-1) {
                 hashpipe_error(thread_name, "Error opening file.");
