@@ -1045,6 +1045,11 @@ int debug_i=0, debug_j=0;
   uint64_t pkts_processed_phys = 0;
   uint64_t ns_processed_phys = 0;
 
+  // Used to calculate moving average of fill-to-free times for input blocks
+  uint64_t fill_to_free_elapsed_ns;
+  uint64_t fill_to_free_moving_sum_ns = 0;
+  uint64_t fill_to_free_block_ns[N_INPUT_BLOCKS] = {0};
+
   //struct timespec ts_sleep = {0, 10 * 1000 * 1000}; // 10 ms
 
 #if 0
@@ -1558,11 +1563,31 @@ printf("packet block: %ld   working blocks: %ld %lu\n", pkt_blk_num, wblk[0].blo
 
     // Mark input block free
     hpguppi_input_databuf_set_free(dbin, block_idx_in);
+
+    // Update moving sum (for moving average)
     clock_gettime(CLOCK_MONOTONIC, &ts_free_input);
+    fill_to_free_elapsed_ns = ELAPSED_NS(ts_stop_recv, ts_free_input);
+    // Add new value, subtract old value
+    fill_to_free_moving_sum_ns +=
+        fill_to_free_elapsed_ns - fill_to_free_block_ns[block_idx_in];
+    // Store new value
+    fill_to_free_block_ns[block_idx_in] = fill_to_free_elapsed_ns;
+
+    if(block_idx_in == N_INPUT_BLOCKS - 1) {
+      hashpipe_status_lock_safe(&st);
+      {
+        hputr8(st.buf, "PKTBLKMS",
+            round((double)fill_to_free_moving_sum_ns / N_INPUT_BLOCKS) / 1e6);
+      }
+      hashpipe_status_unlock_safe(&st);
+    }
+
+#if 0
     fprintf(stderr, "blkin %d fill at %ld free +%ld ns (%d packets)\n",
         block_idx_in,
         ELAPSED_NS(ts_input_full0, ts_stop_recv),
         ELAPSED_NS(ts_stop_recv, ts_free_input), njobs);
+#endif
 
     // Advance to next input block
     block_idx_in = (block_idx_in + 1) % dbin->header.n_block;
