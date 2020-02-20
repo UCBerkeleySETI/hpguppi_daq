@@ -160,12 +160,13 @@ then
   use_fifo=no
   #net_thread=hpguppi_meerkat_net_thread
   #net_thread=hpguppi_meerkat_pkt_thread
-  net_thread="hpguppi_meerkat_pkt_thread -m 0xe000 hpguppi_meerkat_spead_thread"
+  net_thread="hpguppi_meerkat_pkt_thread -c 11 hpguppi_meerkat_spead_thread"
   bindport=7148
   instances[0]="${instances[0]/datax/buf0}"
   instances[1]="${instances[1]/datax2/buf1}"
   # For initial testing...
   out_thread=null_output_thread
+  #out_thread=hpguppi_rawdisk_only_thread
   shift
 elif echo "$1" | grep -q 'thread'
 then
