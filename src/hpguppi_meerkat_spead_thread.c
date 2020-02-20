@@ -1082,6 +1082,10 @@ int debug_i=0, debug_j=0;
       obsnchan = mk_obsnchan(obs_info);
       pktidx_per_block = mk_pktidx_per_block(BLOCK_DATA_SIZE, obs_info);
       eff_block_size = mk_block_size(BLOCK_DATA_SIZE, obs_info);
+
+      hputs(st.buf, "OBSINFO", "VALID");
+    } else {
+      hputs(st.buf, "OBSINFO", "INVALID");
     }
 
     // Write (store default/invlid values if not present)
@@ -1156,6 +1160,35 @@ int debug_i=0, debug_j=0;
 
           hputr4(st.buf, "PHYSGBPS", physgbps);
           hputr4(st.buf, "PHYSPKPS", physpkps);
+
+          // Update obs_info
+          //
+          // Read (no change if not present)
+          hgetu4(st.buf, "FENCHAN", &obs_info.fenchan);
+          hgetu4(st.buf, "NANTS",   &obs_info.nants);
+          hgetu4(st.buf, "NSTRM",   &obs_info.nstrm);
+          hgetu4(st.buf, "HNTIME",  &obs_info.hntime);
+          hgetu4(st.buf, "HNCHAN",  &obs_info.hnchan);
+          hgetu8(st.buf, "HCLOCKS", &obs_info.hclocks);
+          hgeti4(st.buf, "SCHAN",   &obs_info.schan);
+
+          // If obs_info is valid
+          if(mk_obs_info_valid(obs_info)) {
+            // Update obsnchan, pktidx_per_block, and eff_block_size
+            obsnchan = mk_obsnchan(obs_info);
+            pktidx_per_block = mk_pktidx_per_block(BLOCK_DATA_SIZE, obs_info);
+            eff_block_size = mk_block_size(BLOCK_DATA_SIZE, obs_info);
+
+            hputu4(st.buf, "OBSNCHAN", obsnchan);
+            hputu4(st.buf, "PIPERBLK", pktidx_per_block);
+            hputi4(st.buf, "BLOCSIZE", eff_block_size);
+
+            hputs(st.buf, "OBSINFO", "VALID");
+          } else {
+            hputs(st.buf, "OBSINFO", "INVALID");
+          }
+          //
+          // End update obs_info
         }
         hashpipe_status_unlock_safe(&st);
 
@@ -1226,6 +1259,21 @@ int debug_i=0, debug_j=0;
         fprintf(stderr, "final fill-to-free %ld ns\n", ELAPSED_NS(ts_stop_recv, ts_free_input));
       }
       break;
+    }
+
+    // If obs_info is invalid
+    if(!mk_obs_info_valid(obs_info)) {
+      hashpipe_status_lock_safe(&st);
+      {
+        hputs(st.buf, status_key, "obsinfo");
+      }
+      hashpipe_status_unlock_safe(&st);
+      waiting=0;
+
+      // Mark input block free
+      hpguppi_input_databuf_set_free(dbin, block_idx_in);
+      // Advance to next input block
+      block_idx_in = (block_idx_in + 1) % dbin->header.n_block;
     }
 
     // Got packet(s)!  Update status if needed.
