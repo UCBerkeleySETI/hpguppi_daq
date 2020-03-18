@@ -172,7 +172,7 @@
 // total of 102,400,000 bytes (clearly less than 128 MiB):
 //
 //     2**10 * 1e5 bytes == 2**13 bytes/pkt * (5**5 * 2) pkts/pol * 2 pols
-#define PKSUWL_BLOCK_DATA_SIZE (1024*10*1000) // in bytes
+#define PKSUWL_BLOCK_DATA_SIZE (1024*100*1000) // in bytes
 #define PKSUWL_PKTIDX_PER_BLOCK (6250)
 #endif // USE_POWER_OF_TWO_NCHAN
 
