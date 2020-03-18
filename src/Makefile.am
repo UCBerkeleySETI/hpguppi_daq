@@ -15,6 +15,8 @@ hpguppi_support = hpguppi_params.h \
 		  hpguppi_params.c \
 		  hpguppi_mkfeng.h \
 		  hpguppi_pksuwl.h \
+		  hpguppi_rawspec.h \
+		  hpguppi_rawspec.c \
 		  hpguppi_time.h   \
 		  hpguppi_time.c   \
 		  hpguppi_udp.h    \
