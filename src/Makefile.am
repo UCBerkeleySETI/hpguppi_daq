@@ -35,7 +35,8 @@ hpguppi_threads = hpguppi_net_thread.c     \
 		  hpguppi_meerkat_spead_thread.c \
 		  hpguppi_pksuwl_net_thread.c \
 		  hpguppi_rawdisk_thread.c \
-		  hpguppi_rawdisk_only_thread.c
+		  hpguppi_rawdisk_only_thread.c \
+		  hpguppi_fildisk_only_thread.c
 
 # This is the paper_gpu plugin itself
 lib_LTLIBRARIES = hpguppi_daq.la
