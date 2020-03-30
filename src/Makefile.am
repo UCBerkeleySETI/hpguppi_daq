@@ -27,7 +27,8 @@ hpguppi_support = hpguppi_params.h \
 
 libsla_support = slalib.h sla.c f77.h
 
-hpguppi_threads = hpguppi_net_thread.c     \
+hpguppi_threads = hpguppi_ibverbs_pkt_thread.c \
+		  hpguppi_net_thread.c \
 		  hpguppi_mb1_net_thread.c \
 		  hpguppi_mb128ch_net_thread.c \
 		  hpguppi_meerkat_net_thread.c \
