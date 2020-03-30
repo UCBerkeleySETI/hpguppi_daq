@@ -512,6 +512,8 @@ int debug_i=0, debug_j=0;
   uint64_t curblk = 0;
 
   // Used to track next block/slot to be assigned to a work request.
+  // next_slot is always within the range 0 to slots_per_block-1, but
+  // next_block is allowed to grow "forever".
   uint64_t next_block = 0;
   uint32_t next_slot = 0;
 
@@ -535,6 +537,13 @@ int debug_i=0, debug_j=0;
   if(hpguppi_ibverbs_init(&hibv_ctx, st, db)) {
     hashpipe_error(thread_name, "hpguppi_ibverbs_init failed");
     return NULL;
+  }
+
+  // Initialize next slot
+  next_slot = hibv_ctx.recv_pkt_num + 1;
+  if(next_slot > pktbuf_info->slots_per_block) {
+    next_slot = 0;
+    next_block++;
   }
 
   // Variables for counting packets and bytes as well as elapsed time
