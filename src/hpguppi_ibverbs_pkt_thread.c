@@ -266,7 +266,7 @@ hpguppi_ibverbs_init(struct hashpipe_ibv_context * hibv_ctx,
                      hpguppi_input_databuf_t * db)
 {
   int i, j;
-  struct hpguppi_pktbuf_info * pktbuf_info = hpguppi_get_pktbuf_info(db);
+  struct hpguppi_pktbuf_info * pktbuf_info = hpguppi_pktbuf_info_ptr(db);
   uint32_t num_chunks = pktbuf_info->num_chunks;
   struct hpguppi_pktbuf_chunk * chunks = pktbuf_info->chunks;
   uint64_t base_addr;
@@ -351,7 +351,7 @@ hpguppi_ibverbs_init(struct hashpipe_ibv_context * hibv_ctx,
   for(i=0; i<hibv_ctx->recv_pkt_num; i++) {
     hibv_ctx->recv_pkt_buf[i].wr.num_sge = num_chunks;
 
-    base_addr = (uint64_t)hpguppi_block_slot_ptr(db, 0, i);
+    base_addr = (uint64_t)hpguppi_pktbuf_block_slot_ptr(db, 0, i);
     for(j=0; j<num_chunks; j++) {
       hibv_ctx->recv_sge_buf[num_chunks*i+j].addr = base_addr + chunks[j].chunk_offset;
       hibv_ctx->recv_sge_buf[num_chunks*i+j].length = chunks[j].chunk_size;
@@ -440,7 +440,7 @@ static int init(hashpipe_thread_args_t *args)
   const char * status_key = args->thread_desc->skey;
 
   // Get pointer to hpguppi_pktbuf_info
-  struct hpguppi_pktbuf_info * pktbuf_info = hpguppi_get_pktbuf_info(db);
+  struct hpguppi_pktbuf_info * pktbuf_info = hpguppi_pktbuf_info_ptr(db);
 
   // Set default ibcpltsz value
   char ibvpktsz[80];
@@ -482,8 +482,8 @@ int debug_i=0, debug_j=0;
   const char * thread_name = args->thread_desc->name;
   const char * status_key = args->thread_desc->skey;
 
-  // pkbuf_info related variables
-  struct hpguppi_pktbuf_info * pktbuf_info = hpguppi_get_pktbuf_info(db);
+  // pktbuf_info related variables
+  struct hpguppi_pktbuf_info * pktbuf_info = hpguppi_pktbuf_info_ptr(db);
   uint32_t num_chunks = pktbuf_info->num_chunks;
   struct hpguppi_pktbuf_chunk * chunks = pktbuf_info->chunks;
   size_t slots_per_block = pktbuf_info->slots_per_block;
@@ -647,7 +647,7 @@ int debug_i=0, debug_j=0;
       bytes_received += curr_rpkt->length;
 
       // Update current WR with new destination addresses for all SGEs
-      base_addr = (uint64_t)hpguppi_block_slot_ptr(db, next_block, next_slot);
+      base_addr = (uint64_t)hpguppi_pktbuf_block_slot_ptr(db, next_block, next_slot);
       for(i=0; i<num_chunks; i++) {
         curr_rpkt->wr.sg_list[i].addr = base_addr + chunks[i].chunk_offset;
       }

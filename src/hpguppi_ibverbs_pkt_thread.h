@@ -49,7 +49,7 @@ struct hpguppi_pktbuf_info {
 // TODO Check db->header.data_type?
 static inline
 struct hpguppi_pktbuf_info *
-hpguppi_get_pktbuf_info(hpguppi_input_databuf_t *db)
+hpguppi_pktbuf_info_ptr(hpguppi_input_databuf_t *db)
 {
   return (struct hpguppi_pktbuf_info *)(db->padding);
 }
@@ -57,10 +57,10 @@ hpguppi_get_pktbuf_info(hpguppi_input_databuf_t *db)
 // Function to get a pointer to slot "slot_id" in block "block_id" of databuf "db".
 static inline
 uint8_t *
-hpguppi_block_slot_ptr(hpguppi_input_databuf_t *db,
+hpguppi_pktbuf_block_slot_ptr(hpguppi_input_databuf_t *db,
     uint64_t block_id, uint32_t slot_id)
 {
-  struct hpguppi_pktbuf_info * pktbuf_info = hpguppi_get_pktbuf_info(db);
+  struct hpguppi_pktbuf_info * pktbuf_info = hpguppi_pktbuf_info_ptr(db);
   return (uint8_t *)db->block[block_id].data + slot_id * pktbuf_info->slot_size;
 }
 
