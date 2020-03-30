@@ -1,4 +1,4 @@
-// hpguppi_ibverbs_pkt_thread.c
+// hpguppi_meerkat_pkt_thread.c
 //
 // A Hashpipe thread that receives packets from a network interface using IB
 // Verbs.  This is purely a packet capture thread.  Packets are stored in
