@@ -262,6 +262,57 @@ hashpipe_ibv_context_ptr(hpguppi_input_databuf_t *db)
       db->padding + sizeof(struct hpguppi_pktbuf_info));
 }
 
+// See comments in hpguppi_ibverbs_pkt_thread.h.
+// This is essentially a passthrough to hashpipe_ibv_flow().
+int
+hpguppi_ibvpkt_flow(
+    hpguppi_input_databuf_t *db,
+    uint32_t  flow_idx,   enum ibv_flow_spec_type flow_type,
+    uint8_t * dst_mac,    uint8_t * src_mac,
+    uint16_t  ether_type, uint16_t  vlan_tag,
+    uint32_t  src_ip,     uint32_t  dst_ip,
+    uint16_t  src_port,   uint16_t  dst_port)
+{
+  struct hashpipe_ibv_context * hibv_ctx = hashpipe_ibv_context_ptr(db);
+
+  return hashpipe_ibv_flow(hibv_ctx,
+    flow_idx,   flow_type,
+    dst_mac,    src_mac,
+    ether_type, vlan_tag,
+    src_ip,     dst_ip,
+    src_port,   dst_port);
+}
+
+// Function that threads can call to wait for hpguppi_ibvpkt_thread to finalize
+// ibverbs setup.  After this funtion returns, the underlying
+// hashpipe_ibv_context structure used by hpguppi_ibvpkt_thread will be fully
+// initialized and flows can be created/destroyed by calling
+// hpguppi_ibvpkt_flow().
+void
+hpguppi_ibvpkt_wait_running(hashpipe_status_t * st)
+{
+  char ibvstat[80];
+  struct timespec ts_sleep = {
+    .tv_sec  = 0,
+    .tv_nsec = 100*1000*1000 // 100 ms
+  };
+
+  // Loop until break when IBVSTAT is "running"
+  for(;;) {
+    hashpipe_status_lock_safe(st);
+    {
+      hgets(st->buf,  "IBVSTAT", sizeof(ibvstat), ibvstat);
+    }
+    hashpipe_status_unlock_safe(st);
+
+    if(!strcmp(ibvstat, "running")) {
+      break;
+    }
+
+    nanosleep(&ts_sleep, NULL);
+  }
+}
+
 // The hpguppi_ibverbs_init() function sets up the hashpipe_ibv_context
 // structure and then call hashpipe_ibv_init().  This uses the "user-managed
 // buffers" feature of hashpipe_ibverbs so that packets will be stored directly
