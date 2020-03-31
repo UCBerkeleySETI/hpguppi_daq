@@ -667,9 +667,10 @@ int debug_i=0, debug_j=0;
 
     // If no packets and errno is non-zero
     if(!hibv_rpkt && errno) {
-      // Print error and break out of main loop
-      perror("hashpipe_ibv_recv_pkts");
-      break;
+      // Print error, reset errno, and continue receiving
+      hashpipe_error(thread_name, "hashpipe_ibv_recv_pkts");
+      errno = 0;
+      continue;
     }
 
     // Check for 50 ms update interval
