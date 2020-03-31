@@ -586,6 +586,7 @@ int debug_i=0, debug_j=0;
   // Misc counters, etc
   int i;
   uint64_t base_addr;
+  int got_wc_error = 0;
 
   // We maintain two active blocks at all times.  curblk is the number of the
   // older of the two blocks with block number curblk+1 being the other of the
@@ -725,7 +726,9 @@ int debug_i=0, debug_j=0;
             curr_rpkt->wr.wr_id,
             curr_rpkt->wr.sg_list->addr,
             db->block, sizeof(db->block));
-        pthread_exit(NULL);
+        // Set flag to break out of main loop and then break out of for loop
+        got_wc_error = 1;
+        break;
       }
 
       // If time to advance the ring buffer block
@@ -757,6 +760,11 @@ int debug_i=0, debug_j=0;
         next_block++;
       }
     } // end for each packet
+
+    // Break out of main loop if we got a work completion error
+    if(got_wc_error) {
+      break;
+    }
 
     // Release packets (i.e. repost work requests)
     if(hashpipe_ibv_release_pkts(hibv_ctx,
