@@ -116,6 +116,7 @@ out_thread=hpguppi_rawdisk_thread
 bindport=60000
 vlan=
 use_fifo=yes
+options=
 
 if [ "$1" = 'perf' ]
 then
@@ -160,7 +161,8 @@ then
   use_fifo=no
   #net_thread=hpguppi_meerkat_net_thread
   #net_thread=hpguppi_meerkat_pkt_thread
-  net_thread="hpguppi_meerkat_pkt_thread -c 11 hpguppi_meerkat_spead_thread"
+  net_thread="hpguppi_ibvpkt_thread -c 11 hpguppi_meerkat_spead_thread"
+  options="-o IBVPKTSZ=42,96,1024"
   bindport=7148
   instances[0]="${instances[0]/datax/buf0}"
   instances[1]="${instances[1]/datax2/buf1}"
@@ -212,7 +214,7 @@ do
   if [ -n "${args}" ]
   then
     echo Starting instance $hostname/$instidx
-    if init $instidx $args "${@}"
+    if init $instidx $args $options "${@}"
     then
       echo Instance $hostname/$instidx pid $!
       hashpipe_check_status -I $instidx -k SYNCTIME -i ${sync_time:-0}

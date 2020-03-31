@@ -38,6 +38,8 @@
 #include "hpguppi_databuf.h"
 #include "hpguppi_time.h"
 #include "hpguppi_mkfeng.h"
+#include "hpguppi_ibverbs_pkt_thread.h"
+
 
 #define ELAPSED_NS(start,stop) \
   (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
@@ -751,6 +753,13 @@ packet_job_function(void * arg)
 // such as setting up network connections or GPU devices.
 static int init(hashpipe_thread_args_t *args)
 {
+  // Local aliases to shorten access to args fields
+  // Our input buffer happens to be a hpguppi_input_databuf
+  hpguppi_input_databuf_t *dbin  = (hpguppi_input_databuf_t *)args->ibuf;
+  const char * thread_name = args->thread_desc->name;
+  const char * status_key = args->thread_desc->skey;
+  hashpipe_status_t st = args->st;
+
   // Non-network essential paramaters
   int blocsize=BLOCK_DATA_SIZE;
   int directio=1;
@@ -765,25 +774,34 @@ static int init(hashpipe_thread_args_t *args)
   double tbin=1e-6;
   char obs_mode[80];
 	struct rlimit rlim;
-  const char * status_key = args->thread_desc->skey;
 
   strcpy(obs_mode, "RAW");
+
+  // Verify that the IBVPKTSZ was specified as expected/requried
+  if(hpguppi_pktbuf_slot_offset(dbin, PKT_OFFSET_MEERKAT_SPEAD_HEADER) %
+      PKT_ALIGNMENT_SIZE != 0
+  || hpguppi_pktbuf_slot_offset(dbin, PKT_OFFSET_MEERKAT_SPEAD_PAYLOAD) %
+      PKT_ALIGNMENT_SIZE != 0) {
+    errno = EINVAL;
+    hashpipe_error(thread_name, "IBVPKTSZ!=%d,%d,[...]",
+        PKT_OFFSET_MEERKAT_SPEAD_HEADER, PKT_OFFSET_MEERKAT_SPEAD_PAYLOAD -
+        PKT_OFFSET_MEERKAT_SPEAD_HEADER);
+    return HASHPIPE_ERR_PARAM;
+  }
 
 	// Set RLIMIT_RTPRIO to 1
 	getrlimit(RLIMIT_RTPRIO, &rlim);
 	rlim.rlim_cur = 1;
 	if(setrlimit(RLIMIT_RTPRIO, &rlim)) {
-		perror("setrlimit(RLIMIT_RTPRIO)");
+		hashpipe_error(thread_name, "setrlimit(RLIMIT_RTPRIO)");
 	}
 
   struct sched_param sched_param = {
     .sched_priority = 1
   };
   if(sched_setscheduler(0, SCHED_RR, &sched_param)) {
-    perror("sched_setscheduler");
+    hashpipe_error(thread_name, "sched_setscheduler");
   }
-
-  hashpipe_status_t st = args->st;
 
   hashpipe_status_lock_safe(&st);
   {
@@ -852,15 +870,39 @@ int debug_i=0, debug_j=0;
   const char * thread_name = args->thread_desc->name;
   const char * status_key = args->thread_desc->skey;
 
+  // String version of destination address
+  char dest_ip_stream_str[80] = {};
+  char dest_ip_stream_str_new[80] = {};
+  char * pchar;
+  // Numeric form of dest_ip
+  struct in_addr dest_ip;
+  int dest_idx;
+  // Number of destination IPs we are listening for
+  int nstreams = 0;
+  // Max flows allowed (from hpguppi_ibvpkt_thread via status buffer)
+  uint32_t max_flows = 0;
+  // Port to listen on
+  uint32_t port = 7148;
+
   // Current run state
   //enum run_states state = LISTEN;
   unsigned waiting = 0;
-  // Update status_key with idle state
+  // Update status_key with idle state and get max_flows, port
   hashpipe_status_lock_safe(&st);
   {
     hputs(st.buf, status_key, "listen");
+    hgetu4(st.buf, "MAXFLOWS", &max_flows);
+    hgetu4(st.buf, "BINDPORT", &port);
+    // Store bind port in status buffer (in case it was not there before).
+    hputu4(st.buf, "BINDPORT", port);
   }
   hashpipe_status_unlock_safe(&st);
+
+  // Make sure we got a non-zero max_flows
+  if(max_flows == 0) {
+    hashpipe_error(thread_name, "MAXFLOWS not found!");
+    return NULL;
+  }
 
   // Misc counters, etc
   int rv=0;
@@ -988,8 +1030,10 @@ int debug_i=0, debug_j=0;
   char timestr[32] = {0};
 
   // Variables for working with the input databuf
+  struct hpguppi_pktbuf_info * pktbuf_info = hpguppi_pktbuf_info_ptr(dbin);
   int block_idx_in = 0;
-  const int npkts_per_block_in = BLOCK_DATA_SIZE / MAX_PKT_SIZE;
+  const int npkts_per_block_in = pktbuf_info->slots_per_block;
+  const int slot_size = pktbuf_info->slot_size;
   struct timespec timeout_in = {0, 50 * 1000 * 1000}; // 50 ms
 
   // Variables for counting packets and bytes.
@@ -1108,6 +1152,9 @@ int debug_i=0, debug_j=0;
   }
   hashpipe_status_unlock_safe(&st);
 
+  // Wait for ibvpkt thread to be running, then it's OK to add/remove flows.
+  hpguppi_ibvpkt_wait_running(&st);
+
   // Main loop
   while (run_threads()) {
 
@@ -1126,19 +1173,16 @@ int debug_i=0, debug_j=0;
           dbin, block_idx_in, &timeout_in);
       clock_gettime(CLOCK_MONOTONIC, &ts_stop_recv);
 
-      if(rv) {
-        // Has time advanced to a new second
-        time(&curtime);
-        if(curtime == lasttime) {
-          // No, continue receiving
-          continue;
-        }
+      time(&curtime);
+
+      if(rv && curtime == lasttime) {
+        // No, continue receiving
+        continue;
       }
 
       // Got packets or new second
 
       // We perform some status buffer updates every second
-      time(&curtime);
       if(curtime != lasttime) {
         lasttime = curtime;
         ctime_r(&curtime, timestr);
@@ -1194,6 +1238,10 @@ int debug_i=0, debug_j=0;
           }
           //
           // End update obs_info
+
+          // Get DESTIP address
+          hgets(st.buf,  "DESTIP",
+              sizeof(dest_ip_stream_str_new), dest_ip_stream_str_new);
         }
         hashpipe_status_unlock_safe(&st);
 
@@ -1239,6 +1287,87 @@ int debug_i=0, debug_j=0;
           hashpipe_status_unlock_safe(&st);
         }
 #endif
+        // If DESTIP has changed
+        if(strcmp(dest_ip_stream_str, dest_ip_stream_str_new)) {
+
+          // Make sure the change is allowed
+          // If we are listening, the only allowed change is to "0.0.0.0"
+          if(nstreams > 0 && strcmp(dest_ip_stream_str_new, "0.0.0.0")) {
+            hashpipe_error(thread_name,
+                "already listening to %s, can't switch to %s",
+                dest_ip_stream_str, dest_ip_stream_str_new);
+          } else {
+            // Parse the A.B.C.D+N notation
+            //
+            // Nul terminate at '+', if present
+            if((pchar = strchr(dest_ip_stream_str_new, '+'))) {
+              // Null terminate dest_ip portion and point to N
+              *pchar = '\0';
+            }
+
+            // If the IP address fails to satisfy aton()
+            if(!inet_aton(dest_ip_stream_str_new, &dest_ip)) {
+              hashpipe_error(thread_name, "invalid DESTIP: %s", dest_ip_stream_str_new);
+            } else {
+              // If switching to "0.0.0.0"
+              if(dest_ip.s_addr == INADDR_ANY) {
+                // Remove all flows
+                hashpipe_info(thread_name, "dest_ip %s (removing %d flows)",
+                    dest_ip_stream_str_new, nstreams);
+                for(dest_idx=0; dest_idx < nstreams; dest_idx++) {
+                  if(hpguppi_ibvpkt_flow(dbin, dest_idx, IBV_FLOW_SPEC_UDP,
+                        0, 0, 0, 0, 0, 0, 0, 0))
+                  {
+                    hashpipe_error(thread_name, "hashpipe_ibv_flow error");
+                  }
+                }
+                nstreams = 0;
+                // TODO Update the IDLE/CAPTURE state???
+              } else {
+                // Get number of streams
+                nstreams = 1;
+                if(pchar) {
+                  nstreams = strtoul(pchar+1, NULL, 0);
+                  nstreams++;
+                }
+                if(nstreams > max_flows) {
+                  nstreams = max_flows;
+                }
+                // Add flows for stream
+                hashpipe_info(thread_name, "dest_ip %s+%s flows",
+                    dest_ip_stream_str_new, pchar ? pchar+1 : "0");
+                hashpipe_info(thread_name, "adding %d flows", nstreams);
+                for(dest_idx=0; dest_idx < nstreams; dest_idx++) {
+                  if(hpguppi_ibvpkt_flow(dbin, dest_idx, IBV_FLOW_SPEC_UDP,
+                        //hibv_ctx->mac, NULL, 0, 0,
+                        NULL, NULL, 0, 0,
+                        0, ntohl(dest_ip.s_addr)+dest_idx, 0, port))
+                  {
+                    hashpipe_error(thread_name, "hashpipe_ibv_flow error");
+                    break;
+                  }
+                }
+                // TODO Update the IDLE/CAPTURE state???
+              } // end zero/non-zero IP
+
+              // Restore '+' if it was found
+              if(pchar) {
+                *pchar = '+';
+              }
+              // Save the new DESTIP string
+              strncpy(dest_ip_stream_str, dest_ip_stream_str_new,
+                  sizeof(dest_ip_stream_str));
+            } // end ip valid
+          } // end destip change allowed
+
+          // Store (possibly unchanged) DESTIP/NSTRM
+          hashpipe_status_lock_safe(&st);
+          {
+            hputs(st.buf,  "DESTIP", dest_ip_stream_str);
+            hputu4(st.buf, "NSTRM", nstreams);
+          }
+          hashpipe_status_unlock_safe(&st);
+        } // end destip changed
       } // curtime != lasttime
 
       // Set status field to "waiting" if we are not getting packets
@@ -1279,6 +1408,9 @@ int debug_i=0, debug_j=0;
       hpguppi_input_databuf_set_free(dbin, block_idx_in);
       // Advance to next input block
       block_idx_in = (block_idx_in + 1) % dbin->header.n_block;
+
+      // Go back to waiting for block to be filled
+      continue;
     }
 
     // Got packet(s)!  Update status if needed.
@@ -1298,7 +1430,7 @@ int debug_i=0, debug_j=0;
     // For each packet: process all packets
     njobs = 0;
     p_u8pkt = (uint8_t *)hpguppi_databuf_data(dbin, block_idx_in);
-    for(i=0; i < npkts_per_block_in; i++, p_u8pkt += MAX_PKT_SIZE) {
+    for(i=0; i < npkts_per_block_in; i++, p_u8pkt += slot_size) {
 #if 0
       // Non-temporally copy packet into cached buffer
       memcpy_nt(p_spdpkt, p_u8pkt, MAX_PKT_SIZE);

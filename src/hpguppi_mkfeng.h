@@ -160,10 +160,21 @@ struct __attribute__ ((__packed__)) mk_ibv_spead_pkt {
   struct ethhdr ethhdr;
   struct iphdr iphdr;
   struct udphdr udphdr;
-  uint8_t padding[22];
-  uint64_t spdhdr[16];
+  uint8_t pad0[22];
+  uint64_t spdhdr[12];
+  uint8_t pad1[32];
 	uint8_t payload[];
 };
+
+// SPEAD header byte offset within (unpadded) packet
+#define PKT_OFFSET_MEERKAT_SPEAD_HEADER \
+  (sizeof(struct ethhdr) + \
+   sizeof(struct iphdr ) + \
+   sizeof(struct udphdr))
+
+// SPEAD payload byte offset within (unpadded) packet
+#define PKT_OFFSET_MEERKAT_SPEAD_PAYLOAD \
+  (PKT_OFFSET_MEERKAT_SPEAD_HEADER + 12*sizeof(uint64_t))
 
 // The F engines send out 1024 bytes of payload per packet.  MAX_PKT_SIZE is
 // the next power of two that fits that plus non-payload bytes.
