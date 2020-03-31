@@ -752,7 +752,7 @@ int debug_i=0, debug_j=0;
 
       // Advance slot
       next_slot++;
-      if(next_slot > slots_per_block) {
+      if(next_slot >= slots_per_block) {
         next_slot = 0;
         next_block++;
       }
