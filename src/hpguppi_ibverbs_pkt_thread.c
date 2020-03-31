@@ -497,6 +497,11 @@ update_status_buffer(hashpipe_status_t *st, int nfull, int nblocks,
 // of downstream threads.  If the IBVPKTSZ field is not present, the
 // pktbuf_info structure will be initialized assuming a 9K packet size in one
 // chunk.
+//
+// This function also ensures that other status fields used by this thread are
+// present in the status buffer so that they will be available to the init()
+// functions of downstream threads.  Hashpipe calls init() functions in
+// pipeline order, but calls run() functions in reverse pipeline order.
 static int init(hashpipe_thread_args_t *args)
 {
   // Local aliases to shorten access to args fields
@@ -508,17 +513,34 @@ static int init(hashpipe_thread_args_t *args)
   // Get pointer to hpguppi_pktbuf_info
   struct hpguppi_pktbuf_info * pktbuf_info = hpguppi_pktbuf_info_ptr(db);
 
-  // Set default ibcpltsz value
+  // Variabled to get/set status bnuffer fields
+  uint32_t max_flows = 0;
+  char ifname[80] = {0};
   char ibvpktsz[80];
   strcpy(ibvpktsz, "9216"); // 9216 == 9*1024
 
   hashpipe_status_lock_safe(st);
   {
     // Get info from status buffer if present (no change if not present)
+    hgets(st->buf,  "IBVIFACE", sizeof(ifname), ifname);
+    if(ifname[0] == '\0') {
+      hgets(st->buf,  "BINDHOST", sizeof(ifname), ifname);
+      if(ifname[0] == '\0') {
+        strcpy(ifname, "eth4");
+        hputs(st->buf, "IBVIFACE", ifname);
+      }
+    }
+
     hgets(st->buf,  "IBVPKTSZ", sizeof(ibvpktsz), ibvpktsz);
+    hgetu4(st->buf, "MAXFLOWS", &max_flows);
+
+    if(max_flows == 0) {
+      max_flows = 1;
+    }
 
     // Store ibvpktsz in status buffer (in case it was not there before).
     hputs(st->buf, "IBVPKTSZ", ibvpktsz);
+    hputu4(st->buf, "MAXFLOWS", max_flows);
 
     // Set status_key to init
     hputs(st->buf, status_key, "init");
