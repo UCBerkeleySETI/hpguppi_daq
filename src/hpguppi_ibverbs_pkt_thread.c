@@ -248,6 +248,20 @@ parse_ibvpktsz(struct hpguppi_pktbuf_info *pktbuf_info, char * ibvpktsz)
   return 0;
 }
 
+// Function to get a pointer to a databuf's hashpipe_ibv_context structure.
+// Assumes that the hashpipe_ibv_context  structure is tucked into the
+// "padding" bytes of the hpguppi_intput_databuf just after the pktbuf_info
+// structure.
+// TODO This is all too ugly!  Create a new databuf type!!!
+// TODO Check db->header.data_type?
+static inline
+struct hashpipe_ibv_context *
+hashpipe_ibv_context_ptr(hpguppi_input_databuf_t *db)
+{
+  return (struct hashpipe_ibv_context *)(
+      db->padding + sizeof(struct hpguppi_pktbuf_info));
+}
+
 // The hpguppi_ibverbs_init() function sets up the hashpipe_ibv_context
 // structure and then call hashpipe_ibv_init().  This uses the "user-managed
 // buffers" feature of hashpipe_ibverbs so that packets will be stored directly
@@ -271,7 +285,8 @@ hpguppi_ibverbs_init(struct hashpipe_ibv_context * hibv_ctx,
   struct hpguppi_pktbuf_chunk * chunks = pktbuf_info->chunks;
   uint64_t base_addr;
 
-  hibv_ctx->interface_name[0] = '\0';
+  memset(hibv_ctx, 0, sizeof(struct hashpipe_ibv_context));
+
   hibv_ctx->max_flows = DEFAULT_MAX_FLOWS;
 
   hashpipe_status_lock_safe(st);
@@ -489,7 +504,7 @@ int debug_i=0, debug_j=0;
   size_t slots_per_block = pktbuf_info->slots_per_block;
 
   // The all important hashpipe_ibv_context
-  struct hashpipe_ibv_context hibv_ctx = {0};
+  struct hashpipe_ibv_context * hibv_ctx = hashpipe_ibv_context_ptr(db);
 
   // Variables for handing received packets
   struct hashpipe_ibv_recv_pkt * hibv_rpkt = NULL;
@@ -534,13 +549,13 @@ int debug_i=0, debug_j=0;
   }
 
   // Initialize IBV
-  if(hpguppi_ibverbs_init(&hibv_ctx, st, db)) {
+  if(hpguppi_ibverbs_init(hibv_ctx, st, db)) {
     hashpipe_error(thread_name, "hpguppi_ibverbs_init failed");
     return NULL;
   }
 
   // Initialize next slot
-  next_slot = hibv_ctx.recv_pkt_num + 1;
+  next_slot = hibv_ctx->recv_pkt_num + 1;
   if(next_slot > pktbuf_info->slots_per_block) {
     next_slot = 0;
     next_block++;
@@ -562,7 +577,7 @@ int debug_i=0, debug_j=0;
   hashpipe_status_unlock_safe(st);
 
   if(sniffer_flag > 0) {
-    if(!(sniffer_flow = create_sniffer_flow(&hibv_ctx))) {
+    if(!(sniffer_flow = create_sniffer_flow(hibv_ctx))) {
       hashpipe_error(thread_name, "create_sniffer_flow failed");
       sniffer_flag = -1;
     } else {
@@ -575,7 +590,7 @@ int debug_i=0, debug_j=0;
 
   // Main loop
   while (run_threads()) {
-    hibv_rpkt = hashpipe_ibv_recv_pkts(&hibv_ctx, 50); // 50 ms timeout
+    hibv_rpkt = hashpipe_ibv_recv_pkts(hibv_ctx, 50); // 50 ms timeout
 
     // If no packets and errno is non-zero
     if(!hibv_rpkt && errno) {
@@ -602,7 +617,7 @@ int debug_i=0, debug_j=0;
 
       // Manage sniffer_flow as needed
       if(sniffer_flag > 0 && !sniffer_flow) {
-        if(!(sniffer_flow = create_sniffer_flow(&hibv_ctx))) {
+        if(!(sniffer_flow = create_sniffer_flow(hibv_ctx))) {
           hashpipe_error(thread_name, "create_sniffer_flow failed");
           sniffer_flag = -1;
         } else {
@@ -670,7 +685,7 @@ int debug_i=0, debug_j=0;
     } // end for each packet
 
     // Release packets (i.e. repost work requests)
-    if(hashpipe_ibv_release_pkts(&hibv_ctx,
+    if(hashpipe_ibv_release_pkts(hibv_ctx,
           (struct hashpipe_ibv_recv_pkt *)hibv_rpkt)) {
       perror("hashpipe_ibv_release_pkts");
     }
