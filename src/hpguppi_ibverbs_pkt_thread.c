@@ -248,6 +248,37 @@ parse_ibvpktsz(struct hpguppi_pktbuf_info *pktbuf_info, char * ibvpktsz)
   return 0;
 }
 
+// Function to get the offset within a slot corresponding to an (unaligned)
+// offset within a packet.  This accounts for the padding between chunks.  For
+// example, if the chuck sizes are 14,20,1500 (e.g. MAC,IP,PAYLOAD) and the
+// chunks are aligned on 64 byte boundaries, then (unaligned) packet offset 34
+// (e.g. start of PAYLOAD) would have (aligned) slot offset 64.
+off_t
+hpguppi_pktbuf_slot_offset(hpguppi_input_databuf_t *db, off_t pkt_offset)
+{
+  int i;
+  off_t slot_offset;
+  struct hpguppi_pktbuf_info * pktbuf_info = hpguppi_pktbuf_info_ptr(db);
+  for(i=0; i<pktbuf_info->num_chunks; i++) {
+    // If pkt_offset is within this chunk, break out of loop
+    if(pkt_offset < pktbuf_info->chunks[i].chunk_size) {
+      break;
+    }
+    pkt_offset -= pktbuf_info->chunks[i].chunk_size;
+  }
+
+  // If pkt_offset exceeds sum of chunk sizes (i.e. if we didn't break out of
+  // the loop early), it's an error, but we recurse until we get down to a
+  // pkt_offset that doesn't exceed the sum of chuck sizes.
+  if(i == pktbuf_info->num_chunks) {
+    slot_offset = hpguppi_pktbuf_slot_offset(db, pkt_offset);
+  } else {
+    slot_offset = pktbuf_info->chunks[i].chunk_offset + pkt_offset;
+  }
+
+  return slot_offset;
+}
+
 // Function to get a pointer to a databuf's hashpipe_ibv_context structure.
 // Assumes that the hashpipe_ibv_context  structure is tucked into the
 // "padding" bytes of the hpguppi_intput_databuf just after the pktbuf_info

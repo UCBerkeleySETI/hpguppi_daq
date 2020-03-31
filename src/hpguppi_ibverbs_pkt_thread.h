@@ -54,6 +54,14 @@ hpguppi_pktbuf_info_ptr(hpguppi_input_databuf_t *db)
   return (struct hpguppi_pktbuf_info *)(db->padding);
 }
 
+// Function to get the offset within a slot to an (unaligned) offset within a
+// packet.  This accounts for the padding between chunks.  For example, if the
+// chuck sizes are 14,20,1500 (e.g. MAC,IP,PAYLOAD) and the chunks are aligned
+// on 64 byte boundaries, then (unaligned) packet offset 34 (e.g. start of
+// PAYLOAD) would have (aligned) slot offset 64.
+off_t
+hpguppi_pktbuf_slot_offset(hpguppi_input_databuf_t *db, off_t pkt_offset);
+
 // `hpguppi_ibvpkt_flow() is used to setup flow rules on the NIC to
 // select which incoming packets will be passed to us by the NIC.  Flows are
 // specified by providing values that various fields in the packet headers must
