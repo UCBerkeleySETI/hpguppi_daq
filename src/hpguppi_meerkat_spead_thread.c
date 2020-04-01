@@ -1,7 +1,7 @@
 // hpguppi_meerkat_spead_thread.c
 //
-// A Hashpipe thread that parses MeerKAT SPEAD packets from an input bufferr
-// (e.g. populated by hpguppi_meerkat_pkt_thread) and assembles them into GUPPI
+// A Hashpipe thread that parses MeerKAT SPEAD packets from an input buffer
+// populated by hpguppi_ibverbs_pkt_thread and assembles them into GUPPI
 // RAW blocks.
 
 // TODO TEST Wait for first (second?) start-of-block when transitioning into
