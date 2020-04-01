@@ -169,6 +169,7 @@ hpguppi_query_max_wr(const char * interface_name)
 
   if(hashpipe_ibv_get_interface_info(interface_name, NULL, &interface_id)) {
     hashpipe_error(interface_name, "error getting interace info");
+    errno = 0;
     return -1;
   }
 
@@ -684,6 +685,7 @@ int debug_i=0, debug_j=0;
   if(sniffer_flag > 0) {
     if(!(sniffer_flow = create_sniffer_flow(hibv_ctx))) {
       hashpipe_error(thread_name, "create_sniffer_flow failed");
+      errno = 0;
       sniffer_flag = -1;
     } else {
       hashpipe_info(thread_name, "create_sniffer_flow succeeded");
@@ -725,6 +727,7 @@ int debug_i=0, debug_j=0;
       if(sniffer_flag > 0 && !sniffer_flow) {
         if(!(sniffer_flow = create_sniffer_flow(hibv_ctx))) {
           hashpipe_error(thread_name, "create_sniffer_flow failed");
+          errno = 0;
           sniffer_flag = -1;
         } else {
           hashpipe_info(thread_name, "create_sniffer_flow succeeded");
@@ -732,6 +735,7 @@ int debug_i=0, debug_j=0;
       } else if (sniffer_flag < 1 && sniffer_flow) {
         if(destroy_sniffer_flow(sniffer_flow)) {
           hashpipe_error(thread_name, "destroy_sniffer_flow failed");
+          errno = 0;
           sniffer_flag = -1;
         }
         sniffer_flow = NULL;
@@ -800,7 +804,8 @@ int debug_i=0, debug_j=0;
     // Release packets (i.e. repost work requests)
     if(hashpipe_ibv_release_pkts(hibv_ctx,
           (struct hashpipe_ibv_recv_pkt *)hibv_rpkt)) {
-      perror("hashpipe_ibv_release_pkts");
+      hashpipe_error(thread_name, "hashpipe_ibv_release_pkts");
+      errno = 0;
     }
 
     // Will exit if thread has been cancelled
