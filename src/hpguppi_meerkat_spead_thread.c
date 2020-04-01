@@ -1517,7 +1517,6 @@ fprintf(stderr, "feng_chan    = 0x%016lx\n", feng_spead_info.feng_chan   );
         hashpipe_status_lock_safe(&st);
         {
           hputi8(st.buf, "PKTIDX", pkt_seq_num);
-          hputi8(st.buf, "PKTBLK", pkt_blk_num); // TODO do we want/need this?
           hputi4(st.buf, "BLOCSIZE", eff_block_size);
 
           hgetu8(st.buf, "PKTSTART", &start_seq_num);
@@ -1708,7 +1707,7 @@ printf("packet block: %ld   working blocks: %ld %lu\n", pkt_blk_num, wblk[0].blo
     if(block_idx_in == N_INPUT_BLOCKS - 1) {
       hashpipe_status_lock_safe(&st);
       {
-        hputr8(st.buf, "PKTBLKMS",
+        hputr8(st.buf, "NETBLKMS",
             round((double)fill_to_free_moving_sum_ns / N_INPUT_BLOCKS) / 1e6);
       }
       hashpipe_status_unlock_safe(&st);
