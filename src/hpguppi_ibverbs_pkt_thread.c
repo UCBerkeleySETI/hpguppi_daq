@@ -645,7 +645,7 @@ int debug_i=0, debug_j=0;
   // sniffer_flag <0 disabled completely, 0 enabled but off, >0 enabled and on
   // The disabled completely state is to completely avoid the sniffer if an
   // error in encountered with it.  We also disable it completely unless
-  // IBVSNIFF is >-1 in the status buffer at startup.
+  // IBVSNIFF>-1 in the status buffer at startup.
   int32_t sniffer_flag = -1;
 
   // Wait until the first two blocks are marked as free
@@ -690,6 +690,8 @@ int debug_i=0, debug_j=0;
     } else {
       hashpipe_info(thread_name, "create_sniffer_flow succeeded");
     }
+  } else {
+    hashpipe_info(thread_name, "sniffer_flow disabled");
   }
 
   // Initialize ts_start with current time
@@ -737,11 +739,12 @@ int debug_i=0, debug_j=0;
           hashpipe_error(thread_name, "destroy_sniffer_flow failed");
           errno = 0;
           sniffer_flag = -1;
+        } else {
+          hashpipe_info(thread_name, "destroy_sniffer_flow succeeded");
         }
         sniffer_flow = NULL;
       }
     } // end periodic status buffer update
-
 
     // If no packets
     if(!hibv_rpkt) {
