@@ -32,12 +32,14 @@ struct hpguppi_pktbuf_chunk {
 // divided into "slots".  Each slot holds one packet, possibly with internal
 // and/or trailing padding added to align various sections of the packet to
 // PKT_ALIGNMENT_SIZE.  These sections are called chunks.  num_chunks specifies
-// the number of chunks that are being used.  The slot_size is the size of a
-// slot and equals the sum of the chunk_aligned_sizes.  slots_per_block is the
-// number of slots in a data block.  Note that slot_size * slots_per_block may
-// be less than the size of data block by up PKT_ALIGNMENT_SIZE-1 bytes.
+// the number of chunks that are being used.  The pkt_size is the sum of the
+// (unaligned) sizes of all chunks.  The slot_size is the size of a slot and
+// equals the sum of the chunk_aligned_sizes.  slots_per_block is the number of
+// slots in a data block.  Note that slot_size * slots_per_block may be less
+// than the size of data block by up PKT_ALIGNMENT_SIZE-1 bytes.
 struct hpguppi_pktbuf_info {
   uint32_t num_chunks;
+  size_t pkt_size;
   size_t slot_size;
   size_t slots_per_block;
   struct hpguppi_pktbuf_chunk chunks[MAX_CHUNKS];

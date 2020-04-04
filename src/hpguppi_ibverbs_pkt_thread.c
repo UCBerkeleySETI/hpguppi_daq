@@ -191,6 +191,7 @@ parse_ibvpktsz(struct hpguppi_pktbuf_info *pktbuf_info, char * ibvpktsz)
   int i;
   char * p;
   uint32_t nchunks = 0;
+  size_t pkt_size = 0;
   size_t slot_size = 0;
 
   if(!ibvpktsz) {
@@ -238,11 +239,14 @@ parse_ibvpktsz(struct hpguppi_pktbuf_info *pktbuf_info, char * ibvpktsz)
     pktbuf_info->chunks[i].chunk_aligned_size = pktbuf_info->chunks[i].chunk_size +
       ((-pktbuf_info->chunks[i].chunk_size) % PKT_ALIGNMENT_SIZE);
     pktbuf_info->chunks[i].chunk_offset = slot_size;
+    // Accumulate pkt_size and slot_size
+    pkt_size += pktbuf_info->chunks[i].chunk_size;
     slot_size += pktbuf_info->chunks[i].chunk_aligned_size;
   }
 
   // Store final values
   pktbuf_info->num_chunks = nchunks;
+  pktbuf_info->pkt_size = pkt_size;
   pktbuf_info->slot_size = slot_size;
   pktbuf_info->slots_per_block = BLOCK_DATA_SIZE / slot_size;
 
