@@ -195,16 +195,30 @@ vdif_get_timespec(struct vdifhdr * p,
   ts->tv_nsec = ns_per_data_frame * vdif_get_data_frame_seq(p);
 }
 
+#define PKT_OFFSET_PKSUWL_VDIF_HEADER \
+  (sizeof(struct ethhdr) + \
+   sizeof(struct iphdr ) + \
+   sizeof(struct udphdr))
+
+#define PKT_OFFSET_PKSUWL_VDIF_PAYLOAD \
+  (PKT_OFFSET_PKSUWL_VDIF_HEADER + sizeof(struct vdifhdr))
+
+// PKT_OFFSETs when capturing 802.1Q (tagged VLAN) packets
+
+#define PKT_OFFSET_PKSUWL_VDIF_HEADER_8021Q \
+  (PKT_OFFSET_PKSUWL_VDIF_HEADER + 4)
+
+#define PKT_OFFSET_PKSUWL_VDIF_PAYLOAD_8021Q \
+  (PKT_OFFSET_PKSUWL_VDIF_PAYLOAD + 4)
+
 static inline
 struct vdifhdr *
 vdif_hdr_from_eth(void * p)
 {
-  off_t offset = sizeof(struct ethhdr)
-               + sizeof(struct iphdr)
-               + sizeof(struct udphdr);
-  if(ntohs(((struct ethhdr *)p)->h_proto) == ETH_P_8021Q) {
-    offset += 4;
-  }
+  off_t offset = (ntohs(((struct ethhdr *)p)->h_proto) == ETH_P_8021Q)
+               ? PKT_OFFSET_PKSUWL_VDIF_HEADER_8021Q
+               : PKT_OFFSET_PKSUWL_VDIF_HEADER;
+
   return (struct vdifhdr *)(p + offset);
 }
 
