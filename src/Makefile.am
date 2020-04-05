@@ -11,7 +11,7 @@ AM_CFLAGS = -ggdb -fPIC -O3 -Wall -Werror -fno-strict-aliasing -mavx512f
 hpguppi_databuf = hpguppi_databuf.h \
 		  hpguppi_databuf.c
 
-hpguppi_support = hpguppi_params.h \
+hpguppi_support = hpguppi_ibverbs_pkt_thread.h \
 		  hpguppi_params.c \
 		  hpguppi_mkfeng.h \
 		  hpguppi_pksuwl.h \
