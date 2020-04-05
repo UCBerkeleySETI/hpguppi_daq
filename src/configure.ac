@@ -20,6 +20,11 @@ AS_VAR_SET_IF(CFLAGS,[],[CFLAGS=])
 # Checks for programs.
 AC_PROG_CC
 
+# Check processor flags
+AX_CHECK_X86_FEATURES
+AM_CONDITIONAL([HAVE_AVX512F],
+               [test "x$ax_cv_gcc_x86_cpu_supports_avx512f" = xyes])
+
 # Check for HASHPIPE
 AX_CHECK_HASHPIPE
 
