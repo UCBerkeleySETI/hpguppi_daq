@@ -21,6 +21,7 @@
 #include "hpguppi_params.h"
 #include "hpguppi_pksuwl.h"
 #include "hpguppi_rawspec.h"
+#include "hpguppi_util.h"
 
 // 80 character string for the BACKEND header record.
 static const char BACKEND_RECORD[] =
@@ -161,6 +162,7 @@ static void *run(hashpipe_thread_args_t * args)
     // Our output buffer happens to be a hpguppi_input_databuf
     hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->ibuf;
     hashpipe_status_t st = args->st;
+    const char * thread_name = args->thread_desc->name;
     const char * status_key = args->thread_desc->skey;
 
     rawspec_context * ctx = (rawspec_context *)args->user_data;
@@ -260,20 +262,9 @@ static void *run(hashpipe_thread_args_t * args)
             if (last_slash!=NULL && last_slash!=datadir) {
                 *last_slash = '\0';
                 printf("Using directory '%s' for output.\n", datadir);
-                char cmd[1024];
-                sprintf(cmd, "mkdir -m 1777 -p %s", datadir);
-                rv = system(cmd);
-		if(rv) {
-		    if(rv == -1) {
-			// system() call failed (e.g. fork() failed)
-			hashpipe_error("hpguppi_fildisk_only_thread", "Error calling system(\"%s\")", cmd);
-		    } else {
-			// system call succeeded, but command failed
-			rv = WEXITSTATUS(rv); // Get exit code of command
-			hashpipe_error("hpguppi_fildisk_only_thread", "\"%s\" returned exit code %d (%s)",
-				cmd, rv, strerror(rv));
-		    }
-		    pthread_exit(NULL);
+		if(mkdir_p(datadir, 0755) == -1) {
+		  hashpipe_error(thread_name, "mkdir_p(%s)", datadir);
+		  break;
 		}
             }
 

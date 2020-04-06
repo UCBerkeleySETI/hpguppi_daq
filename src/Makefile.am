@@ -4,7 +4,7 @@ AM_CPPFLAGS     =
 AM_CPPFLAGS += -I"@HASHPIPE_INCDIR@"
 
 # AM_CFLAGS is used for all C compiles
-AM_CFLAGS = -ggdb -fPIC -O3 -Wall -Werror -fno-strict-aliasing @X86_FEATURE_CFLAGS@
+AM_CFLAGS = -ggdb -fPIC -O3 -Wall -Werror -Wno-error=cpp -fno-strict-aliasing @X86_FEATURE_CFLAGS@
 
 # Convenience variables to group source files
 hpguppi_databuf = hpguppi_databuf.h \
@@ -18,6 +18,8 @@ hpguppi_support = hpguppi_ibverbs_pkt_thread.h \
 		  hpguppi_rawspec.c \
 		  hpguppi_time.h   \
 		  hpguppi_time.c   \
+		  hpguppi_util.h   \
+		  hpguppi_util.c   \
 		  hpguppi_udp.h    \
 		  hpguppi_udp.c    \
 		  hpguppi_vdif.h   \
@@ -32,17 +34,12 @@ hpguppi_threads = hpguppi_ibverbs_pkt_thread.c \
 		  hpguppi_mb128ch_net_thread.c \
 		  hpguppi_meerkat_net_thread.c \
 		  hpguppi_meerkat_pkt_thread.c \
+		  hpguppi_meerkat_spead_thread.c \
 		  hpguppi_pksuwl_net_thread.c \
 		  hpguppi_pksuwl_vdif_thread.c \
 		  hpguppi_rawdisk_thread.c \
 		  hpguppi_rawdisk_only_thread.c \
 		  hpguppi_fildisk_only_thread.c
-
-# Add AVX512F dependent threads only if supported on build machine
-# This probably isn't the best way to do this.  Improvements welcome.
-if HAVE_AVX512F
-hpguppi_threads += hpguppi_meerkat_spead_thread.c
-endif
 
 # This is the hpguppi_daq plugin
 lib_LTLIBRARIES = hpguppi_daq.la

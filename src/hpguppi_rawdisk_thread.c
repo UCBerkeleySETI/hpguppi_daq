@@ -21,6 +21,7 @@
 #include "hpguppi_params.h"
 #include "hpguppi_pksuwl.h"
 #include "hpguppi_rawspec.h"
+#include "hpguppi_util.h"
 
 // 80 character string for the BACKEND header record.
 static const char BACKEND_RECORD[] =
@@ -62,6 +63,7 @@ static int init(hashpipe_thread_args_t * args)
 
     hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->ibuf;
     hashpipe_status_t st = args->st;
+    const char * thread_name = args->thread_desc->name;
 
     hashpipe_status_lock_safe(&st);
     // Get Nc from OBSNCHAN
@@ -71,14 +73,14 @@ static int init(hashpipe_thread_args_t * args)
     hashpipe_status_unlock_safe(&st);
 
     if(Nc == 0) {
-      hashpipe_error("hpguppi_rawdisk_thread",
+      hashpipe_error(thread_name,
 	  "OBSNCHAN not found in status buffer");
       return HASHPIPE_ERR_PARAM;
     }
 
     ctx = calloc(1, sizeof(rawspec_context));
     if(!ctx) {
-      hashpipe_error("hpguppi_rawdisk_thread",
+      hashpipe_error(thread_name,
 	  "unable to allocate rawspec context");
       return HASHPIPE_ERR_SYS;
     }
@@ -122,7 +124,7 @@ static int init(hashpipe_thread_args_t * args)
     // Init user_data to be array of callback data structures
     cb_data = calloc(ctx->No, sizeof(rawspec_callback_data_t));
     if(!cb_data) {
-      hashpipe_error("hpguppi_rawdisk_thread",
+      hashpipe_error(thread_name,
 	  "unable to allocate rawspec callback data");
       return HASHPIPE_ERR_SYS;
     }
@@ -148,7 +150,7 @@ static int init(hashpipe_thread_args_t * args)
     ctx->Nb_host = args->ibuf->n_block;
     ctx->h_blkbufs = malloc(ctx->Nb_host * sizeof(void *));
     if(!ctx->h_blkbufs) {
-      hashpipe_error("hpguppi_rawdisk_thread",
+      hashpipe_error(thread_name,
 	  "unable to allocate rawspec h_blkbuf array");
       return HASHPIPE_ERR_SYS;
     }
@@ -158,7 +160,7 @@ static int init(hashpipe_thread_args_t * args)
 
     // Initialize rawspec
     if(rawspec_initialize(ctx)) {
-      hashpipe_error("hpguppi_rawdisk_thread",
+      hashpipe_error(thread_name,
 	  "rawspec initialization failed");
       return HASHPIPE_ERR_SYS;
     } else {
@@ -184,6 +186,7 @@ static void *run(hashpipe_thread_args_t * args)
     // Our output buffer happens to be a hpguppi_input_databuf
     hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->ibuf;
     hashpipe_status_t st = args->st;
+    const char * thread_name = args->thread_desc->name;
     const char * status_key = args->thread_desc->skey;
 
     rawspec_context * ctx = (rawspec_context *)args->user_data;
@@ -205,7 +208,7 @@ static void *run(hashpipe_thread_args_t * args)
 
     /* Set I/O priority class for this thread to "real time" */
     if(ioprio_set(IOPRIO_WHO_PROCESS, 0, IOPRIO_PRIO_VALUE(IOPRIO_CLASS_RT, 7))) {
-      hashpipe_error("hpguppi_rawdisk_thread", "ioprio_set IOPRIO_CLASS_RT");
+      hashpipe_error(thread_name, "ioprio_set IOPRIO_CLASS_RT");
     }
 
     /* Loop */
@@ -298,20 +301,9 @@ static void *run(hashpipe_thread_args_t * args)
             if (last_slash!=NULL && last_slash!=datadir) {
                 *last_slash = '\0';
                 printf("Using directory '%s' for output.\n", datadir);
-                char cmd[1024];
-                sprintf(cmd, "mkdir -m 1777 -p %s", datadir);
-                rv = system(cmd);
-		if(rv) {
-		    if(rv == -1) {
-			// system() call failed (e.g. fork() failed)
-			hashpipe_error("hpguppi_rawdisk_thread", "Error calling system(\"%s\")", cmd);
-		    } else {
-			// system call succeeded, but command failed
-			rv = WEXITSTATUS(rv); // Get exit code of command
-			hashpipe_error("hpguppi_rawdisk_thread", "\"%s\" returned exit code %d (%s)",
-				cmd, rv, strerror(rv));
-		    }
-		    pthread_exit(NULL);
+		if(mkdir_p(datadir, 0755) == -1) {
+		  hashpipe_error(thread_name, "mkdir_p(%s)", datadir);
+		  break;
 		}
             }
             // TODO: check for file exist.
@@ -321,7 +313,7 @@ static void *run(hashpipe_thread_args_t * args)
             }
             fdraw = open(fname, open_flags, 0644);
             if (fdraw==-1) {
-                hashpipe_error("hpguppi_rawdisk_thread", "Error opening file.");
+                hashpipe_error(thread_name, "Error opening file.");
                 pthread_exit(NULL);
             }
 
@@ -348,7 +340,7 @@ static void *run(hashpipe_thread_args_t * args)
 	      if(cb_data[i].fd == -1) {
 		// If we can't open this output file, we probably won't be able to
 		// open any more output files, so print message and bail out.
-		hashpipe_error("hpguppi_rawdisk_thread",
+		hashpipe_error(thread_name,
 		    "cannot open filterbank output file, giving up");
                 pthread_exit(NULL);
 	      }
@@ -373,7 +365,7 @@ static void *run(hashpipe_thread_args_t * args)
             fprintf(stderr, "Opening raw file '%s' (directio=%d)\n", fname, directio);
             fdraw = open(fname, open_flags, 0644);
             if (fdraw==-1) {
-                hashpipe_error("hpguppi_rawdisk_thread", "Error opening file.");
+                hashpipe_error(thread_name, "Error opening file.");
                 pthread_exit(NULL);
             }
             block_count=0;
@@ -417,11 +409,8 @@ static void *run(hashpipe_thread_args_t * args)
             /* Write header (and padding, if any) */
             rv = write_all(fdraw, ptr, len);
             if (rv != len) {
-                char msg[100];
-                perror("hpguppi_rawdisk_thread write_all header");
-                sprintf(msg, "Error writing data (ptr=%p, len=%d, rv=%d)", ptr, len, rv);
-                hashpipe_error("hpguppi_rawdisk_thread", msg);
-                        //"Error writing data.");
+                hashpipe_error(thread_name,
+		    "write_all header (ptr=%p, len=%d) = %d)", ptr, len, rv);
             }
 
             /* Write data */
@@ -433,11 +422,8 @@ static void *run(hashpipe_thread_args_t * args)
             }
             rv = write_all(fdraw, ptr, (size_t)len);
             if (rv != len) {
-                char msg[100];
-                perror("hpguppi_rawdisk_thread write_all block");
-                sprintf(msg, "Error writing data (ptr=%p, len=%d, rv=%d)", ptr, len, rv);
-                hashpipe_error("hpguppi_rawdisk_thread", msg);
-                        //"Error writing data.");
+                hashpipe_error(thread_name,
+		    "write_all data (ptr=%p, len=%d) = %d)", ptr, len, rv);
             }
 
 	    if(!directio) {

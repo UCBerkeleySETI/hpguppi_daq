@@ -1,4 +1,4 @@
-/* hpguppi_rawdisk_thread.c
+/* hpguppi_rawdisk_only_thread.c
  *
  * Write databuf blocks out to disk.
  */
@@ -20,7 +20,8 @@
 
 #include "hpguppi_databuf.h"
 #include "hpguppi_params.h"
-#include "hpguppi_pksuwl.h"
+//#include "hpguppi_pksuwl.h"
+#include "hpguppi_util.h"
 
 // 80 character string for the BACKEND header record.
 static const char BACKEND_RECORD[] =
@@ -32,50 +33,6 @@ static const char BACKEND_RECORD[] =
 #ifndef DEBUG_RAWSPEC_CALLBACKS
 #define DEBUG_RAWSPEC_CALLBACKS (0)
 #endif
-
-static
-int
-mkdir_p(char *pathname, mode_t mode)
-{
-  char *p = pathname;
-
-  if(!pathname) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  // If absolute path is given, move past leading '/'
-  if(*p == '/') {
-    p++;
-  }
-
-  // Find first (non-root) slash, if any
-  p = strchr(p, '/');
-
-  // Make sure all parent diretories exist
-  while(p && *p) {
-    // NUL terminate at '/'
-    *p = '\0';
-
-    // Make directory, ignore EEXIST errors
-    if(mkdir(pathname, mode) && errno != EEXIST) {
-      return -1;
-    }
-
-    // Restore '/' and advance p to next character
-    *p++ = '/';
-
-    // Find next slash
-    p = strchr(p, '/');
-  }
-
-  // Make directory, ignore EEXIST errors
-  if(mkdir(pathname, mode) && errno != EEXIST) {
-    return -1;
-  }
-
-  return 0;
-}
 
 static ssize_t write_all(int fd, const void *buf, size_t bytes_to_write)
 {
@@ -239,7 +196,10 @@ static void *run(hashpipe_thread_args_t * args)
             if (last_slash!=NULL && last_slash!=datadir) {
                 *last_slash = '\0';
                 printf("Using directory '%s' for output.\n", datadir);
-		mkdir_p(datadir, 01777);
+		if(mkdir_p(datadir, 0755) == -1) {
+		  hashpipe_error(thread_name, "mkdir_p(%s)", datadir);
+		  break;
+		}
             }
             // TODO: check for file exist.
             open_flags = O_CREAT|O_RDWR|O_SYNC;

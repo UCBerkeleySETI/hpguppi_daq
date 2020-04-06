@@ -28,11 +28,10 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include <immintrin.h>
-
 #include "hashpipe.h"
 #include "hpguppi_databuf.h"
 #include "hpguppi_time.h"
+#include "hpguppi_util.h"
 #include "hpguppi_mkfeng.h"
 
 #include "hashpipe_ibverbs.h"
@@ -42,24 +41,13 @@
 #define DEFAULT_MAX_FLOWS (16)
 #define DEFAULT_NUM_QP (1)
 
-#if 1
-// Non-temporal memcpy
-static
-void memcpy_nt(void *dst, const void *src, size_t len)
-{
-  __m256i m256i;
+// Change to 1 to use temporal memset() rather than non-temporal bzero_nt()
+#if 0
+#define bzero_nt(d,l) memset(d,0,l)
+#endif
 
-  __m256i *dst256 = (__m256i *)(((uintptr_t)dst) & ~0x1f);
-  __m256i *src256 = (__m256i *)(((uintptr_t)src) & ~0x1f);
-  len >>= 5;
-
-  while(len) {
-    m256i = _mm256_stream_load_si256(src256++);
-    _mm256_stream_si256(dst256++, m256i);
-    len--;
-  }
-}
-#else
+// Change to 1 to use temporal memcpy() rather than non-temporal memcpy_nt()
+#if 0
 #define memcpy_nt(dst,src,len) memcpy(dst,src,len)
 #endif
 
@@ -150,28 +138,6 @@ static int hpguppi_mcast_membership(int socket,
 // to disk).
 
 enum run_states {IDLE, LISTEN, RECORD};
-
-#if 0
-// Non-temporal (cache bypass) clearing of memory
-static
-void clear_memory(void * dst, size_t size)
-{
-  // Create 256-bit (32-byte) zero value
-  const __m256i m256 = _mm256_setzero_si256();
-
-  // Cast dst to __m256i pointer
-  __m256i * p256 = (__m256i *)dst;
-
-  // Convert size from 1 byte units to 32 byte units
-  size >>= 5;
-
-  // While size > 0
-  while(size) {
-    *p256++ = m256;
-    size--;
-  }
-}
-#endif
 
 // Structure related to block management
 struct block_info {
@@ -324,7 +290,7 @@ static void wait_for_block_free(const struct block_info * bi,
   // TODO Move this out of net thread (takes too long)
   // TODO Just clear effective block size?
   //memset(block_info_data(bi), 0, BLOCK_DATA_SIZE);
-  clear_memory(block_info_data(bi), BLOCK_DATA_SIZE);
+  bzero_nt(block_info_data(bi), BLOCK_DATA_SIZE);
 #else
           nanosleep(&ts_sleep, NULL);
 #endif
@@ -1296,7 +1262,7 @@ printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_
           // Clear data buffer
           // TODO Move this out of net thread (takes too long)
           //memset(block_info_data(wblk+wblk_idx), 0, eff_block_size);
-          clear_memory(block_info_data(wblk+wblk_idx), eff_block_size);
+          bzero_nt(block_info_data(wblk+wblk_idx), eff_block_size);
 #else
           nanosleep(&ts_sleep, NULL);
 #endif
