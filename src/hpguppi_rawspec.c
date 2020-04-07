@@ -59,7 +59,7 @@ rawspec_dump_callback(
     if(cb_data->output_thread_valid) {
       // Join output thread
       if((rc=pthread_join(cb_data->output_thread, NULL))) {
-        fprintf(stderr, "pthread_join: %s\n", strerror(rc));
+        hashpipe_error(__FUNCTION__, "pthread_join: %s\n", strerror(rc));
       }
       // Flag thread as invalid
       cb_data->output_thread_valid = 0;
@@ -67,7 +67,7 @@ rawspec_dump_callback(
   } else if(callback_type == RAWSPEC_CALLBACK_POST_DUMP) {
     if((rc=pthread_create(&cb_data->output_thread, NULL,
                       rawspec_dump_file_thread_func, cb_data))) {
-      fprintf(stderr, "pthread_create: %s\n", strerror(rc));
+      hashpipe_error(__FUNCTION__, "pthread_create: %s\n", strerror(rc));
     } else {
       cb_data->output_thread_valid = 1;
     }
@@ -78,14 +78,27 @@ void
 rawspec_stop(rawspec_context * ctx)
 {
   int i;
+  int rc;
   rawspec_callback_data_t * cb_data =
     (rawspec_callback_data_t *)ctx->user_data;
 
   // Wait for GPU work to complete
   rawspec_wait_for_completion(ctx);
 
-  // Close rawspec output files
+  // Close rawspec output files after waiting for any worker output_threads to
+  // complete.
   for(i=0; i<ctx->No; i++) {
+    // If this output product's output thread is/was running
+    if(cb_data[i].output_thread_valid) {
+      // Join output thread
+      if((rc=pthread_join(cb_data[i].output_thread, NULL))) {
+        hashpipe_error(__FUNCTION__, "pthread_join: %s\n", strerror(rc));
+      }
+      // Flag thread as invalid
+      cb_data[i].output_thread_valid = 0;
+    }
+
+    // Close output file if it was open
     if(cb_data[i].fd != -1) {
       close(cb_data[i].fd);
       cb_data[i].fd = -1;
