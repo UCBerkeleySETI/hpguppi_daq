@@ -293,14 +293,16 @@ static void *run(hashpipe_thread_args_t * args)
             directio = hpguppi_read_directio_mode(ptr);
             char fname[256];
             sprintf(fname, "%s.%04d.raw", pf.basefilename, filenum);
-            fprintf(stderr, "Opening raw file '%s' (directio=%d)\n", fname, directio);
+            hashpipe_info(thread_name,
+		"Opening raw file '%s' (directio=%d)", fname, directio);
             // Create the output directory if needed
             char datadir[1024];
             strncpy(datadir, pf.basefilename, 1023);
             char *last_slash = strrchr(datadir, '/');
             if (last_slash!=NULL && last_slash!=datadir) {
                 *last_slash = '\0';
-                printf("Using directory '%s' for output.\n", datadir);
+                hashpipe_info(thread_name,
+		    "Using directory '%s' for output.", datadir);
 		if(mkdir_p(datadir, 0755) == -1) {
 		  hashpipe_error(thread_name, "mkdir_p(%s)", datadir);
 		  break;
@@ -327,7 +329,7 @@ static void *run(hashpipe_thread_args_t * args)
 	    // Open filterbank files
 	    for(i=0; i<ctx->No; i++) {
 	      sprintf(fname, "%s.%04d.fil", pf.basefilename, i);
-	      fprintf(stderr, "Opening fil file '%s'\n", fname);
+	      hashpipe_info(thread_name, "Opening fil file '%s'", fname);
 	      last_slash = strrchr(fname, '/');
 	      if(last_slash) {
 		strncpy(cb_data[i].fb_hdr.rawdatafile, last_slash+1, 80);
@@ -362,7 +364,8 @@ static void *run(hashpipe_thread_args_t * args)
             if(directio) {
               open_flags |= O_DIRECT;
             }
-            fprintf(stderr, "Opening raw file '%s' (directio=%d)\n", fname, directio);
+            hashpipe_info(thread_name,
+		"Opening raw file '%s' (directio=%d)", fname, directio);
             fdraw = open(fname, open_flags, 0644);
             if (fdraw==-1) {
                 hashpipe_error(thread_name, "Error opening file.");

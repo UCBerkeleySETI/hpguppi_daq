@@ -40,6 +40,7 @@ static int init(hashpipe_thread_args_t * args)
 
     hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->ibuf;
     hashpipe_status_t st = args->st;
+    const char * thread_name = args->thread_desc->name;
 
     hashpipe_status_lock_safe(&st);
     // Get Nc from OBSNCHAN
@@ -49,14 +50,14 @@ static int init(hashpipe_thread_args_t * args)
     hashpipe_status_unlock_safe(&st);
 
     if(Nc == 0) {
-      hashpipe_error("hpguppi_fildisk_only_thread",
+      hashpipe_error(thread_name,
 	  "OBSNCHAN not found in status buffer");
       return HASHPIPE_ERR_PARAM;
     }
 
     ctx = calloc(1, sizeof(rawspec_context));
     if(!ctx) {
-      hashpipe_error("hpguppi_fildisk_only_thread",
+      hashpipe_error(thread_name,
 	  "unable to allocate rawspec context");
       return HASHPIPE_ERR_SYS;
     }
@@ -100,7 +101,7 @@ static int init(hashpipe_thread_args_t * args)
     // Init user_data to be array of callback data structures
     cb_data = calloc(ctx->No, sizeof(rawspec_callback_data_t));
     if(!cb_data) {
-      hashpipe_error("hpguppi_fildisk_only_thread",
+      hashpipe_error(thread_name,
 	  "unable to allocate rawspec callback data");
       return HASHPIPE_ERR_SYS;
     }
@@ -126,7 +127,7 @@ static int init(hashpipe_thread_args_t * args)
     ctx->Nb_host = args->ibuf->n_block;
     ctx->h_blkbufs = malloc(ctx->Nb_host * sizeof(void *));
     if(!ctx->h_blkbufs) {
-      hashpipe_error("hpguppi_fildisk_only_thread",
+      hashpipe_error(thread_name,
 	  "unable to allocate rawspec h_blkbuf array");
       return HASHPIPE_ERR_SYS;
     }
@@ -136,7 +137,7 @@ static int init(hashpipe_thread_args_t * args)
 
     // Initialize rawspec
     if(rawspec_initialize(ctx)) {
-      hashpipe_error("hpguppi_fildisk_only_thread",
+      hashpipe_error(thread_name,
 	  "rawspec initialization failed");
       return HASHPIPE_ERR_SYS;
     } else {
@@ -180,7 +181,7 @@ static void *run(hashpipe_thread_args_t * args)
 
     /* Set I/O priority class for this thread to "real time" */
     if(ioprio_set(IOPRIO_WHO_PROCESS, 0, IOPRIO_PRIO_VALUE(IOPRIO_CLASS_RT, 7))) {
-      hashpipe_error("hpguppi_fildisk_only_thread", "ioprio_set IOPRIO_CLASS_RT");
+      hashpipe_error(thread_name, "ioprio_set IOPRIO_CLASS_RT");
     }
 
     /* Loop */
@@ -261,7 +262,8 @@ static void *run(hashpipe_thread_args_t * args)
             char *last_slash = strrchr(datadir, '/');
             if (last_slash!=NULL && last_slash!=datadir) {
                 *last_slash = '\0';
-                printf("Using directory '%s' for output.\n", datadir);
+                hashpipe_info(thread_name,
+		    "Using directory '%s' for output", datadir);
 		if(mkdir_p(datadir, 0755) == -1) {
 		  hashpipe_error(thread_name, "mkdir_p(%s)", datadir);
 		  break;
@@ -278,7 +280,7 @@ static void *run(hashpipe_thread_args_t * args)
 	    // Open filterbank files
 	    for(i=0; i<ctx->No; i++) {
 	      sprintf(fname, "%s.%04d.fil", pf.basefilename, i);
-	      fprintf(stderr, "Opening fil file '%s'\n", fname);
+	      hashpipe_info(thread_name, "Opening fil file '%s'", fname);
 	      last_slash = strrchr(fname, '/');
 	      if(last_slash) {
 		strncpy(cb_data[i].fb_hdr.rawdatafile, last_slash+1, 80);
@@ -291,7 +293,7 @@ static void *run(hashpipe_thread_args_t * args)
 	      if(cb_data[i].fd == -1) {
 		// If we can't open this output file, we probably won't be able to
 		// open any more output files, so print message and bail out.
-		hashpipe_error("hpguppi_fildisk_only_thread",
+		hashpipe_error(thread_name,
 		    "cannot open filterbank output file, giving up");
                 pthread_exit(NULL);
 	      }
