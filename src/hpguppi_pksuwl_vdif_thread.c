@@ -409,8 +409,8 @@ update_status_buffer_new_block(hashpipe_status_t *st, uint64_t pkt_blk)
   uint64_t pktstop = 0;
   uint32_t sttvalid = 0;
   uint64_t dwell_blocks = 0;
-  double dwell_seconds;
-  double tbin;
+  double dwell_seconds = 300.0;
+  double tbin = 1/128e6;
 
   struct timeval tv;
 
@@ -489,8 +489,10 @@ init(hashpipe_thread_args_t *args)
   int directio=1;
   int nbits=16;
   int npol=4;
+  // OBSFREQ and OBSBW are different for each instance so we require that they
+  // be pre-specified.
   double obsfreq=0;
-  double obsbw=128.0;
+  double obsbw=0;
   int obsnchan=1;
   int overlap=0;
   double tbin=0.0;
@@ -533,6 +535,25 @@ init(hashpipe_thread_args_t *args)
     return HASHPIPE_ERR_PARAM;
   }
 
+  // Get OBSFREQ and OBSBW first since their absence is a fatal error
+  hashpipe_status_lock_safe(&st);
+  {
+    hgetr8(st.buf, "OBSFREQ", &obsfreq);
+    hgetr8(st.buf, "OBSBW", &obsbw);
+  }
+  hashpipe_status_unlock_safe(&st);
+
+  if(obsfreq == 0.0) {
+    hashpipe_error(thread_name, "OBSFREQ not found but is required");
+    return HASHPIPE_ERR_PARAM;
+  }
+  if(obsbw == 0.0) {
+    hashpipe_error(thread_name, "OBSBW not found but is required");
+    return HASHPIPE_ERR_PARAM;
+  }
+
+  // Set default values for strings
+  strcpy(dest_ip, "0.0.0.0");
   strcpy(obs_mode, "RAW");
 
   hashpipe_status_lock_safe(&st);
@@ -540,10 +561,8 @@ init(hashpipe_thread_args_t *args)
     // Get info from status buffer if present (no change if not present)
     hgeti4(st.buf, "BLOCSIZE", &blocsize);
     hgeti4(st.buf, "DIRECTIO", &directio);
-    hgeti4(st.buf, "NBITS", &nbits);
+    //hgeti4(st.buf, "NBITS", &nbits); // Force to 16 for UWL
     hgeti4(st.buf, "NPOL", &npol);
-    hgetr8(st.buf, "OBSFERQ", &obsfreq);
-    hgetr8(st.buf, "OBSBW", &obsbw);
     //hgeti4(st.buf, "OBSNCHAN", &obsnchan); // Force to 1 for UWL
     hgeti4(st.buf, "OVERLAP", &overlap);
     hgets(st.buf, "OBS_MODE", 80, obs_mode);
@@ -552,13 +571,11 @@ init(hashpipe_thread_args_t *args)
     // Calculate TBIN from OBSNCHAN and OBSBW
     tbin = fabs(obsnchan / obsbw) / 1e6;
 
-    // Store bind host/port info etc in status buffer (in case it was not there
-    // before).
+    // Store info in status buffer (in case it was not there before).
     hputi4(st.buf, "BLOCSIZE", blocsize);
     hputi4(st.buf, "DIRECTIO", directio);
     hputi4(st.buf, "NBITS", nbits);
     hputi4(st.buf, "NPOL", npol);
-    hputr8(st.buf, "OBSBW", obsbw);
     hputr8(st.buf, "CHAN_BW", obsbw);     // CHAN_BW == OBSBW
     hputi4(st.buf, "OBSNCHAN", obsnchan); // Force to 1 for UWL
     hputi4(st.buf, "OVERLAP", overlap);
