@@ -29,8 +29,10 @@
 
 #include "hashpipe.h"
 #include "hpguppi_databuf.h"
-#include "hpguppi_time.h"
 #include "hpguppi_pksuwl.h"
+#include "hpguppi_time.h"
+#include "hpguppi_util.h"
+
 #include "hpguppi_ibverbs_pkt_thread.h"
 
 #define ELAPSED_NS(start,stop) \
@@ -226,7 +228,7 @@ static void wait_for_block_free(const struct block_info * bi,
   }
   hashpipe_status_unlock_safe(st);
 
-  memset(block_info_data(bi), 0, PKSUWL_BLOCK_DATA_SIZE);
+  bzero_nt(block_info_data(bi), PKSUWL_BLOCK_DATA_SIZE);
 }
 
 // The copy_packet_data_to_databuf() function does what it says: copies packet
@@ -835,7 +837,7 @@ run(hashpipe_thread_args_t * args)
         for(wblk_idx=0; wblk_idx<2; wblk_idx++) {
           init_block_info(wblk+wblk_idx, NULL, -1, pkt_blk_num+wblk_idx+1);
           // Clear data buffer
-          memset(block_info_data(wblk+wblk_idx), 0, PKSUWL_BLOCK_DATA_SIZE);
+          bzero_nt(block_info_data(wblk+wblk_idx), PKSUWL_BLOCK_DATA_SIZE);
         }
 
         // Update status buffer for newly reset wblk[0]
