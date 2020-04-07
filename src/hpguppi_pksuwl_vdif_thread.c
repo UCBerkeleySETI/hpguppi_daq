@@ -145,12 +145,53 @@ static void finalize_block(struct block_info *bi)
   }
   char *header = block_info_header(bi);
   char dropstat[128];
+  uint64_t pktidx = bi->block_num * PKSUWL_PKTIDX_PER_BLOCK;
+  uint64_t pktstart = 0;
+  uint64_t pktstop = 0;
+  uint32_t sttvalid = 0;
+
+  struct timeval tv;
+
+  int    stt_imjd = 0;
+  int    stt_smjd = 0;
+  double stt_offs = 0;
+
+  hgetu8(header, "PKTSTART", &pktstart);
+  hgetu8(header, "PKTSTOP", &pktstop);
+  hgetu4(header, "STTVALID", &sttvalid);
+
+  // Ensure STTVALID in block header is consistent with pktidx/pktstart/pktstop
+  // The block's header is a copy of the status buffer when the block was
+  // acquired from the ring buffer, but the STTVALID in the status buffer at
+  // that time was based on two blocks ago.  This check ensures that the first
+  // two blocks of a recording get STTVALID=1.
+  if(pktstart <= pktidx && pktidx < pktstop) {
+    if(sttvalid != 1) {
+      // Calc IMJD/SMJD/OFFS based on PKTSTART
+      // This isn't perfect because it assumes recording started at PKTSTART.
+      // It's possible that the first block recorded happened after PKTSTART.
+      pksuwl_pktidx_to_timeval(pktstart, &tv);
+      get_mjd_from_timeval(&tv, &stt_imjd, &stt_smjd, &stt_offs);
+      hputu4(header, "STTVALID", 1);
+      hputu4(header, "STT_IMJD", stt_imjd);
+      hputu4(header, "STT_SMJD", stt_smjd);
+      hputr8(header, "STT_OFFS", stt_offs);
+    }
+  } else {
+    if(sttvalid != 0) {
+      hputu4(header, "STTVALID", 0);
+    }
+  }
+
+  // Calculate values for NDROP and DROPSTAT
   bi->ndrop = (2 /*pols*/ * PKSUWL_PKTIDX_PER_BLOCK) - bi->npacket;
   sprintf(dropstat, "%d/%d", bi->ndrop, (2 /*pols*/ * PKSUWL_PKTIDX_PER_BLOCK));
-  hputi8(header, "PKTIDX", bi->block_num * PKSUWL_PKTIDX_PER_BLOCK);
+
+  hputi8(header, "PKTIDX", pktidx);
   hputi4(header, "NPKT", bi->npacket);
   hputi4(header, "NDROP", bi->ndrop);
   hputs(header, "DROPSTAT", dropstat);
+
   hpguppi_input_databuf_set_filled(bi->db, bi->block_idx);
 }
 
@@ -407,7 +448,9 @@ update_status_buffer_new_block(hashpipe_status_t *st, uint64_t pkt_blk)
       hputs(st->buf, "DAQSTATE", "RECORD");
 
       if(sttvalid != 1) {
-        // Calc IMJD/SMJD/OFFS
+        // Calc IMJD/SMJD/OFFS based on PKTSTART
+        // This isn't perfect because it assumes recording started at PKTSTART.
+        // It's possible that the first block recorded happened after PKTSTART.
         pksuwl_pktidx_to_timeval(pktstart, &tv);
         get_mjd_from_timeval(&tv, &stt_imjd, &stt_smjd, &stt_offs);
         hputu4(st->buf, "STTVALID", 1);
