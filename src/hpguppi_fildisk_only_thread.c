@@ -231,12 +231,14 @@ static void *run(hashpipe_thread_args_t * args)
 
 		// Stop rawspec here
 		rawspec_stop(ctx);
-		rawspec_block_idx = 0;
 
 		// Print end of recording conditions
-		hashpipe_info("hpguppi_fildisk_only_thread",
-		    "recording stopped: pktstart %lu pktstop %lu pktidx %lu",
-		    pktstart, pktstop, packetidx);
+		hashpipe_info(thread_name,
+		    "recording stopped: pktstart %lu pktstop %lu pktidx %lu (%u blocks to rawspec)",
+		    pktstart, pktstop, packetidx, rawspec_block_idx);
+
+		// Reset rawspec_block_idx
+		rawspec_block_idx = 0;
 	    }
 
 	    /* Mark as free */
@@ -305,6 +307,11 @@ static void *run(hashpipe_thread_args_t * args)
 	      fb_fd_write_header(cb_data[i].fd, &cb_data[i].fb_hdr);
 	    }
         }
+	else if(got_packet_0 == 0) {
+	    hashpipe_warn(thread_name,
+		"pktstart %lu <= pktidx %lu < pktstop %lu, but sttvalid %d",
+		pktstart, packetidx, pktstop, gp.stt_valid);
+	}
 
         /* See how full databuf is */
         //total_status = hpguppi_input_databuf_total_status(db);
