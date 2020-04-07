@@ -66,10 +66,12 @@ static int init(hashpipe_thread_args_t * args)
     const char * thread_name = args->thread_desc->name;
 
     hashpipe_status_lock_safe(&st);
-    // Get Nc from OBSNCHAN
-    hgetu4(st.buf, "OBSNCHAN", &Nc);
-    // Get Nbps from NBITS
-    hgetu4(st.buf, "NBITS", &Nbps);
+    {
+      // Get Nc from OBSNCHAN
+      hgetu4(st.buf, "OBSNCHAN", &Nc);
+      // Get Nbps from NBITS
+      hgetu4(st.buf, "NBITS", &Nbps);
+    }
     hashpipe_status_unlock_safe(&st);
 
     if(Nc == 0) {
@@ -227,7 +229,9 @@ static void *run(hashpipe_thread_args_t * args)
 
         /* Note waiting status */
         hashpipe_status_lock_safe(&st);
-        hputs(st.buf, status_key, "waiting");
+	{
+	  hputs(st.buf, status_key, "waiting");
+	}
         hashpipe_status_unlock_safe(&st);
 
         /* Wait for buf to have data */
@@ -385,7 +389,9 @@ static void *run(hashpipe_thread_args_t * args)
 
             /* Note waiting status */
             hashpipe_status_lock_safe(&st);
-            hputs(st.buf, status_key, "writing");
+	    {
+	      hputs(st.buf, status_key, "writing");
+	    }
             hashpipe_status_unlock_safe(&st);
 
             /* Write header to file */

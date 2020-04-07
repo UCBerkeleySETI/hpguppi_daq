@@ -190,29 +190,40 @@ static void wait_for_block_free(const struct block_info * bi,
   char netbuf_status[80];
   int netbuf_full = hpguppi_input_databuf_total_status(bi->db);
   sprintf(netbuf_status, "%d/%d", netbuf_full, bi->db->header.n_block);
+
   hashpipe_status_lock_safe(st);
-  hgets(st->buf, status_key, sizeof(netstat), netstat);
-  hputs(st->buf, status_key, "waitfree");
-  hputs(st->buf, "NETBUFST", netbuf_status);
+  {
+    hgets(st->buf, status_key, sizeof(netstat), netstat);
+    hputs(st->buf, status_key, "waitfree");
+    hputs(st->buf, "NETBUFST", netbuf_status);
+  }
   hashpipe_status_unlock_safe(st);
+
   while ((rv=hpguppi_input_databuf_wait_free(bi->db, bi->block_idx))
       != HASHPIPE_OK) {
     if (rv==HASHPIPE_TIMEOUT) {
       netbuf_full = hpguppi_input_databuf_total_status(bi->db);
       sprintf(netbuf_status, "%d/%d", netbuf_full, bi->db->header.n_block);
+
       hashpipe_status_lock_safe(st);
-      hputs(st->buf, status_key, "blocked");
-      hputs(st->buf, "NETBUFST", netbuf_status);
+      {
+        hputs(st->buf, status_key, "blocked");
+        hputs(st->buf, "NETBUFST", netbuf_status);
+      }
       hashpipe_status_unlock_safe(st);
+
     } else {
       hashpipe_error("hpguppi_pksuwl_net_thread",
           "error waiting for free databuf");
       pthread_exit(NULL);
     }
   }
+
   hashpipe_status_lock_safe(st);
-  hputs(st->buf, status_key, netstat);
-  memcpy(block_info_header(bi), st->buf, HASHPIPE_STATUS_TOTAL_SIZE);
+  {
+    hputs(st->buf, status_key, netstat);
+    memcpy(block_info_header(bi), st->buf, HASHPIPE_STATUS_TOTAL_SIZE);
+  }
   hashpipe_status_unlock_safe(st);
 
   memset(block_info_data(bi), 0, PKSUWL_BLOCK_DATA_SIZE);

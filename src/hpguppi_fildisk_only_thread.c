@@ -197,7 +197,9 @@ static void *run(hashpipe_thread_args_t * args)
 
         /* Note waiting status */
         hashpipe_status_lock_safe(&st);
-        hputs(st.buf, status_key, "waiting");
+	{
+	  hputs(st.buf, status_key, "waiting");
+	}
         hashpipe_status_unlock_safe(&st);
 
         /* Wait for buf to have data */
