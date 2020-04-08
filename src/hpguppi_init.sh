@@ -148,12 +148,26 @@ then
 elif [ "$1" = 'pksuwl' ]
 then
   redis_sync_key=
+  use_fifo=no
   hpguppi_plugin=/home/davidm/local/src/hpguppi_daq/src/.libs/hpguppi_daq.so
-  net_thread=hpguppi_pksuwl_net_thread
+  #net_thread=hpguppi_pksuwl_net_thread
+  net_thread="hpguppi_ibvpkt_thread -c 11 hpguppi_pksuwl_vdif_thread"
+  out_thread=hpguppi_fildisk_only_thread
   # BINDPORT must be passed as a separate "-o BINDPORT=1234" command line
   # option by caller (e.g. hpguppi_pksuwl_init.sh)
   bindport=
   vlan='.2'
+  #options="-o IBVPKTSZ=42,32,8198" # Not 802.1Q tagged VLAN
+  options="-o IBVPKTSZ=46,32,8198" # 802.1Q tagged VLAN
+  # Handle special case of specifying disk thread as last command line param
+  case "${@:$#}" in
+    *_thread)
+      # Use last param as out_thread
+      out_thread="${@:$#}"
+      # Remove last param from $@
+      set -- "${@:1:$(($#-1))}"
+      ;;
+  esac
   shift
 elif [ "$1" = 'meerkat' ]
 then
