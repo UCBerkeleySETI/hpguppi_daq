@@ -594,7 +594,9 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                 // Reset or increment packet index.  Setting PKTIDX to -1 in
                 // the status buffer (via external means) will simulate a
                 // re-arming of the packet generator (i.e. ROACH2).
+                hashpipe_status_lock_safe(&st);
                 hgetu8(st.buf, "PKTIDX", &fake_pktidx_zero);
+                hashpipe_status_unlock_safe(&st);
                 if(fake_pktidx_zero == -1) {
                     fake_pktidx = 0;
                 } else {
