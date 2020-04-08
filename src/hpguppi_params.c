@@ -45,6 +45,14 @@
         }                                                               \
     }
 
+#define get_uint(key, param, def) {                                      \
+        if (hgetu4(buf, (key), &(param))==0) {                          \
+            if (DEBUGOUT)                                               \
+                printf("Warning:  %s not in status shm!\n", (key));     \
+            (param) = (def);                                            \
+        }                                                               \
+    }
+
 #define get_lon(key, param, def) {                                      \
         {                                                               \
             double dtmp;                                                \
@@ -449,6 +457,16 @@ int hpguppi_read_directio_mode(char *buf)
     int directio = 0;
     get_int("DIRECTIO", directio, 0);
     return directio;
+}
+
+// Read PIPERBLK.  PIPERBLK is the amount PKTIDX increments per block.
+// If zero or missing, it must be inferred from the change in PKTIDX from one
+// block to the next.
+unsigned int hpguppi_read_piperblk(char *buf)
+{
+    int piperblk = 0;
+    get_int("PIPERBLK", piperblk, 0);
+    return piperblk;
 }
 
 // Calculate the largest power of two number of time samples that fit in

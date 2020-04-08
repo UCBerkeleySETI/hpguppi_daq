@@ -72,6 +72,11 @@ void hpguppi_read_pktsock_params(char *buf, struct hpguppi_pktsock_params *p);
 // I/O.
 int hpguppi_read_directio_mode(char *buf);
 
+// Read PIPERBLK.  PIPERBLK is the amount PKTIDX increments per block.
+// If zero or missing, it must be inferred from the change in PKTIDX from one
+// block to the next.
+unsigned int hpguppi_read_piperblk(char *buf);
+
 // Calculate the largest power of two number of time samples that fit in
 // max_block_size block size for a given number of channels.
 int calc_ntime_per_block(int max_block_size, int obsnchan);

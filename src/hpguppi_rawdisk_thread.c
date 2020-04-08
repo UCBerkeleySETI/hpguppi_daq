@@ -214,7 +214,8 @@ static void *run(hashpipe_thread_args_t * args)
     }
 
     /* Loop */
-    int64_t packetidx=0, pktstart=0, pktstop=0;
+    int64_t pktidx=0, pktstart=0, pktstop=0;
+    int64_t piperblk=0, last_pktidx=0;
     int npacket=0, ndrop=0, packetsize=0, blocksize=0, len=0;
     int curblock=0;
     int block_count=0, blocks_per_file=128, filenum=0;
@@ -248,7 +249,7 @@ static void *run(hashpipe_thread_args_t * args)
         }
 
         /* Parse packet size, npacket from header */
-        hgeti8(ptr, "PKTIDX", &packetidx);
+        hgeti8(ptr, "PKTIDX", &pktidx);
         hgeti8(ptr, "PKTSTART", &pktstart);
         hgeti8(ptr, "PKTSTOP", &pktstop);
         hgeti4(ptr, "PKTSIZE", &packetsize);
@@ -256,7 +257,7 @@ static void *run(hashpipe_thread_args_t * args)
         hgeti4(ptr, "NDROP", &ndrop);
 
 	// If packet idx is NOT within start/stop range
-	if(packetidx < pktstart || pktstop <= packetidx) {
+	if(pktidx < pktstart || pktstop <= pktidx) {
 	    // If file open, close it
 	    if(fdraw != -1) {
 		// Close file
@@ -273,10 +274,12 @@ static void *run(hashpipe_thread_args_t * args)
 		// Print end of recording conditions
 		hashpipe_info(thread_name,
 		    "recording stopped: pktstart %lu pktstop %lu pktidx %lu (%u blocks to rawspec)",
-		    pktstart, pktstop, packetidx, rawspec_block_idx);
+		    pktstart, pktstop, pktidx, rawspec_block_idx);
 
-		// Reset rawspec_block_idx
+		// Reset rawspec_block_idx, last_pktidx, and piperblk
 		rawspec_block_idx = 0;
+		last_pktidx = 0;
+		piperblk = 0;
 	    }
 	    /* Mark as free */
 	    hpguppi_input_databuf_set_free(db, curblock);
@@ -292,11 +295,20 @@ static void *run(hashpipe_thread_args_t * args)
 
         // Wait for packet 0 before starting write
 	// "packet 0" is the first packet/block of the new recording,
-	// it is not necessarily packetidx == 0.
+	// it is not necessarily pktidx == 0.
         if (got_packet_0==0 && gp.stt_valid==1) {
             got_packet_0 = 1;
             hpguppi_read_obs_params(ptr, &gp, &pf);
             directio = hpguppi_read_directio_mode(ptr);
+	    // piperblk will be 0 if PIPERBLK is not present (or it's 0)
+	    piperblk = hpguppi_read_piperblk(ptr);
+	    if(piperblk) {
+	      hashpipe_info(thread_name, "found PIPERBLK %lu", piperblk);
+	    }
+	    // If found, pretend the previous block was the one expected
+	    // If not found, this will set last_pktidx = pktidx
+	    last_pktidx = pktidx - piperblk;
+
             char fname[256];
             sprintf(fname, "%s.%04d.raw", pf.basefilename, filenum);
             hashpipe_info(thread_name,
@@ -450,17 +462,55 @@ static void *run(hashpipe_thread_args_t * args)
             /* Increment counter */
             block_count++;
 
+	    // Update piperblk if piperblk is zero
+	    // or pktidx is smaller than last_pktidx + piperblk
+	    if(!piperblk || last_pktidx + piperblk > pktidx) {
+	      piperblk = pktidx - last_pktidx;
+	      if(piperblk) {
+		hashpipe_info(thread_name, "inferring PIPERBLK %lu", piperblk);
+	      }
+	    }
+
+	    // If piperblk is non-zero and pktidx larger than expected
+	    if(piperblk && pktidx > last_pktidx + piperblk) {
+	      hashpipe_info(thread_name,
+		  "pktidx %lu last_pktidx %lu piperblk %lu",
+		  pktidx, last_pktidx, piperblk);
+	      hashpipe_warn(thread_name,
+		  "treating %lu missing blocks as zeros",
+		  (pktidx - last_pktidx - 1) / piperblk);
+
+	      while(pktidx > last_pktidx + piperblk) {
+		last_pktidx += piperblk;
+
+		// If first block of a GPU input buffer
+		if(rawspec_block_idx % ctx->Nb == 0) {
+		  // Wait for work to complete
+		  rawspec_wait_for_completion(ctx);
+		}
+
+		// Feed block of zeros to rawspec here
+		hashpipe_info(thread_name,
+		    "rawspec block %d is zeros", rawspec_block_idx);
+		rawspec_zero_blocks_to_gpu(ctx, rawspec_block_idx, 1);
+		// Increment GPU block index
+		rawspec_block_idx++;
+		// If a multiple of Nb blocks have been sent, start processing
+		if(rawspec_block_idx % ctx->Nb == 0) {
+		  rawspec_start_processing(ctx, RAWSPEC_FORWARD_FFT);
+		}
+	      }
+	    }
+
+	    // Update last_pktidx
+	    last_pktidx = pktidx;
+
 	    // If first block of a GPU input buffer
 	    if(rawspec_block_idx % ctx->Nb == 0) {
 	      // Wait for work to complete (should return immediately if we're
 	      // keeping up)
 	      rawspec_wait_for_completion(ctx);
 	    }
-
-	    // TODO Feed any missing blocks first
-	    // TODO Add function to rawspec to use zeros for missing blocks.
-	    // TODO Add function to rawspec to optimize case of missing an
-	    // entire input buffer.
 
 	    // Feed block to rawspec here
 	    rawspec_copy_blocks_to_gpu(ctx, curblock, rawspec_block_idx, 1);
