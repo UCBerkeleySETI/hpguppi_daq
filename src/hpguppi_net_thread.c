@@ -334,41 +334,41 @@ static int init(hashpipe_thread_args_t *args, const int fake)
 
     strcpy(obs_mode, "RAW");
 
-    hashpipe_status_t st = args->st;
+    hashpipe_status_t *st = &args->st;
 
-    hashpipe_status_lock_safe(&st);
+    hashpipe_status_lock_safe(st);
     // Get network parameters (BINDHOST, BINDPORT, PKTFMT)
-    hpguppi_read_pktsock_params(st.buf, p_psp);
+    hpguppi_read_pktsock_params(st->buf, p_psp);
     // Get info from status buffer if present (no change if not present)
-    hgeti4(st.buf, "BLOCSIZE", &blocsize);
-    hgeti4(st.buf, "DIRECTIO", &directio);
-    hgeti4(st.buf, "NBITS", &nbits);
-    hgeti4(st.buf, "NPOL", &npol);
-    hgetr8(st.buf, "OBSBW", &obsbw);
-    hgeti4(st.buf, "OBSNCHAN", &obsnchan);
-    hgeti4(st.buf, "OBSSCHAN", &obsschan);
-    hgeti4(st.buf, "OVERLAP", &overlap);
-    hgets(st.buf, "OBS_MODE", 80, obs_mode);
+    hgeti4(st->buf, "BLOCSIZE", &blocsize);
+    hgeti4(st->buf, "DIRECTIO", &directio);
+    hgeti4(st->buf, "NBITS", &nbits);
+    hgeti4(st->buf, "NPOL", &npol);
+    hgetr8(st->buf, "OBSBW", &obsbw);
+    hgeti4(st->buf, "OBSNCHAN", &obsnchan);
+    hgeti4(st->buf, "OBSSCHAN", &obsschan);
+    hgeti4(st->buf, "OVERLAP", &overlap);
+    hgets(st->buf, "OBS_MODE", 80, obs_mode);
     // Calculate TBIN
     tbin = obsnchan / obsbw / 1e6;
     // Store bind host/port info etc in status buffer
-    hputs(st.buf, "BINDHOST", p_psp->ifname);
-    hputi4(st.buf, "BINDPORT", p_psp->port);
-    hputs(st.buf, "PKTFMT", p_psp->packet_format);
-    hputi4(st.buf, "BLOCSIZE", blocsize);
-    hputi4(st.buf, "DIRECTIO", directio);
-    hputi4(st.buf, "NBITS", nbits);
-    hputi4(st.buf, "NPOL", npol);
-    hputr8(st.buf, "OBSBW", obsbw);
-    hputi4(st.buf, "OBSNCHAN", obsnchan);
-    hputi4(st.buf, "OBSSCHAN", obsschan);
-    hputi4(st.buf, "OVERLAP", overlap);
-    hputr8(st.buf, "TBIN", tbin);
-    hputs(st.buf, "OBS_MODE", obs_mode);
+    hputs(st->buf, "BINDHOST", p_psp->ifname);
+    hputi4(st->buf, "BINDPORT", p_psp->port);
+    hputs(st->buf, "PKTFMT", p_psp->packet_format);
+    hputi4(st->buf, "BLOCSIZE", blocsize);
+    hputi4(st->buf, "DIRECTIO", directio);
+    hputi4(st->buf, "NBITS", nbits);
+    hputi4(st->buf, "NPOL", npol);
+    hputr8(st->buf, "OBSBW", obsbw);
+    hputi4(st->buf, "OBSNCHAN", obsnchan);
+    hputi4(st->buf, "OBSSCHAN", obsschan);
+    hputi4(st->buf, "OVERLAP", overlap);
+    hputr8(st->buf, "TBIN", tbin);
+    hputs(st->buf, "OBS_MODE", obs_mode);
     // Data are in time-major order (i.e. time dimension changes faster than
     // channel dimension), so specify that data are NOT in channel major order.
-    hputi4(st.buf, "CHANMAJ", 0);
-    hashpipe_status_unlock_safe(&st);
+    hputi4(st->buf, "CHANMAJ", 0);
+    hashpipe_status_unlock_safe(st);
 
     // Set up pktsock.  Make frame_size be a divisor of block size so that
     // frames will be contiguous in mapped mempory.  block_size must also be a
@@ -410,7 +410,7 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
     // Local aliases to shorten access to args fields
     // Our output buffer happens to be a hpguppi_input_databuf
     hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->obuf;
-    hashpipe_status_t st = args->st;
+    hashpipe_status_t *st = &args->st;
     const char * status_key = args->thread_desc->skey;
     struct hpguppi_pktsock_params *p_ps_params =
         (struct hpguppi_pktsock_params *)args->user_data;
@@ -433,9 +433,9 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
     pf.sub.dat_offsets = NULL;
     pf.sub.dat_scales = NULL;
     char status_buf[HASHPIPE_STATUS_TOTAL_SIZE];
-    hashpipe_status_lock_safe(&st);
-    memcpy(status_buf, st.buf, HASHPIPE_STATUS_TOTAL_SIZE);
-    hashpipe_status_unlock_safe(&st);
+    hashpipe_status_lock_safe(st);
+    memcpy(status_buf, st->buf, HASHPIPE_STATUS_TOTAL_SIZE);
+    hashpipe_status_unlock_safe(st);
     hpguppi_read_obs_params(status_buf, &gp, &pf);
     pthread_cleanup_push((void *)hpguppi_free_psrfits, &pf);
 
@@ -594,9 +594,9 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                 // Reset or increment packet index.  Setting PKTIDX to -1 in
                 // the status buffer (via external means) will simulate a
                 // re-arming of the packet generator (i.e. ROACH2).
-                hashpipe_status_lock_safe(&st);
-                hgetu8(st.buf, "PKTIDX", &fake_pktidx_zero);
-                hashpipe_status_unlock_safe(&st);
+                hashpipe_status_lock_safe(st);
+                hgetu8(st->buf, "PKTIDX", &fake_pktidx_zero);
+                hashpipe_status_unlock_safe(st);
                 if(fake_pktidx_zero == -1) {
                     fake_pktidx = 0;
                 } else {
@@ -612,18 +612,18 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                 lasttime = curtime;
                 ctime_r(&curtime, timestr);
                 timestr[strlen(timestr)-1] = '\0'; // Chop off trailing newline
-                hashpipe_status_lock_safe(&st);
-                hputs(st.buf, "DAQPULSE", timestr);
-                hputs(st.buf, "DAQSTATE", state == IDLE  ? "idle" :
+                hashpipe_status_lock_safe(st);
+                hputs(st->buf, "DAQPULSE", timestr);
+                hputs(st->buf, "DAQSTATE", state == IDLE  ? "idle" :
                                           state == ARMED ? "armed"   : "record");
-                hashpipe_status_unlock_safe(&st);
+                hashpipe_status_unlock_safe(st);
             }
 
             /* Set "waiting" flag */
             if (!p_frame && run_threads() && waiting!=1) {
-                hashpipe_status_lock_safe(&st);
-                hputs(st.buf, status_key, "waiting");
-                hashpipe_status_unlock_safe(&st);
+                hashpipe_status_lock_safe(st);
+                hputs(st->buf, status_key, "waiting");
+                hashpipe_status_unlock_safe(st);
                 waiting=1;
             }
 
@@ -685,10 +685,10 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
             /* Unexpected packet size, ignore? */
             nbogus_total++;
             if(nbogus_total % 1000000 == 0) {
-                hashpipe_status_lock_safe(&st);
-                hputi4(st.buf, "NBOGUS", nbogus_total);
-                hputi4(st.buf, "PKTSIZE", PKT_UDP_SIZE(p_frame)-8);
-                hashpipe_status_unlock_safe(&st);
+                hashpipe_status_lock_safe(st);
+                hputi4(st->buf, "NBOGUS", nbogus_total);
+                hputi4(st->buf, "PKTSIZE", PKT_UDP_SIZE(p_frame)-8);
+                hashpipe_status_unlock_safe(st);
             }
             // Release frame!
             if(!fake) hashpipe_pktsock_release_frame(p_frame);
@@ -701,12 +701,12 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
         // Update PKTIDX in status buffer if seq_num % packets_per_block == 0
         // and read PKTSTART, DWELL to calculate start/stop seq numbers.
         if(seq_num % packets_per_block == 0) {
-            hashpipe_status_lock_safe(&st);
-            hputi8(st.buf, "PKTIDX", seq_num);
-            hgetu8(st.buf, "PKTSTART", &start_seq_num);
+            hashpipe_status_lock_safe(st);
+            hputi8(st->buf, "PKTIDX", seq_num);
+            hgetu8(st->buf, "PKTSTART", &start_seq_num);
             start_seq_num -= start_seq_num % packets_per_block;
-            hputu8(st.buf, "PKTSTART", start_seq_num);
-            hgetr8(st.buf, "DWELL", &dwell_seconds);
+            hputu8(st->buf, "PKTSTART", start_seq_num);
+            hgetr8(st->buf, "DWELL", &dwell_seconds);
             // Dwell blocks is equal to:
             //
             //           dwell_seconds * samples/second
@@ -718,15 +718,15 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                     (samples_per_spectrum * spectra_per_packet * packets_per_block));
 
             stop_seq_num = start_seq_num + packets_per_block * dwell_blocks;
-            hputi8(st.buf, "PKTSTOP", stop_seq_num);
-            hashpipe_status_unlock_safe(&st);
+            hputi8(st->buf, "PKTSTOP", stop_seq_num);
+            hashpipe_status_unlock_safe(st);
         }
 
         /* Update status if needed */
         if (waiting!=0) {
-            hashpipe_status_lock_safe(&st);
-            hputs(st.buf, status_key, "receiving");
-            hashpipe_status_unlock_safe(&st);
+            hashpipe_status_lock_safe(st);
+            hputs(st->buf, status_key, "receiving");
+            hashpipe_status_unlock_safe(st);
             waiting=0;
         }
 
@@ -781,18 +781,18 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                     (double)fblock->ndropped /
                     (double)fblock->npacket;
 
-            hashpipe_status_lock_safe(&st);
-            hputi8(st.buf, "PKTIDX", fblock->packet_idx);
-            hputr8(st.buf, "DROPAVG", drop_frac_avg);
-            hputr8(st.buf, "DROPTOT",
+            hashpipe_status_lock_safe(st);
+            hputi8(st->buf, "PKTIDX", fblock->packet_idx);
+            hputr8(st->buf, "DROPAVG", drop_frac_avg);
+            hputr8(st->buf, "DROPTOT",
                     npacket_total ?
                     (double)ndropped_total/(double)npacket_total
                     : 0.0);
-            hputr8(st.buf, "DROPBLK",
+            hputr8(st->buf, "DROPBLK",
                     fblock->npacket ?
                     (double)fblock->ndropped/(double)fblock->npacket
                     : 0.0);
-            hashpipe_status_unlock_safe(&st);
+            hashpipe_status_unlock_safe(st);
 
             if(state == ARMED && seq_num == start_seq_num) {
                 state = RECORD;
@@ -813,21 +813,21 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                 nbogus_total=0;
 
                 // Update status buffer
-                hashpipe_status_lock_safe(&st);
-                hputs(st.buf, "DAQSTATE", "record");
-                hputi4(st.buf, "STT_IMJD", stt_imjd);
-                hputi4(st.buf, "STT_SMJD", stt_smjd);
-                hputr8(st.buf, "STT_OFFS", stt_offs);
-                hputi4(st.buf, "STTVALID", 1);
-                hashpipe_status_unlock_safe(&st);
+                hashpipe_status_lock_safe(st);
+                hputs(st->buf, "DAQSTATE", "record");
+                hputi4(st->buf, "STT_IMJD", stt_imjd);
+                hputi4(st->buf, "STT_SMJD", stt_smjd);
+                hputr8(st->buf, "STT_OFFS", stt_offs);
+                hputi4(st->buf, "STTVALID", 1);
+                hashpipe_status_unlock_safe(st);
             }
 
             if(state == RECORD && seq_num >= stop_seq_num) {
                 state = ARMED;
-                hashpipe_status_lock_safe(&st);
-                hputs(st.buf, "DAQSTATE", "armed");
-                hputi4(st.buf, "STTVALID", 0);
-                hashpipe_status_unlock_safe(&st);
+                hashpipe_status_lock_safe(st);
+                hputs(st->buf, "DAQSTATE", "armed");
+                hputi4(st->buf, "STTVALID", 0);
+                hashpipe_status_unlock_safe(st);
             }
 
             /* Finalize first block, and push it off the list.
@@ -855,9 +855,9 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
             }
 
             /* Read/update current status shared mem */
-            hashpipe_status_lock_safe(&st);
-            memcpy(status_buf, st.buf, HASHPIPE_STATUS_TOTAL_SIZE);
-            hashpipe_status_unlock_safe(&st);
+            hashpipe_status_lock_safe(st);
+            memcpy(status_buf, st->buf, HASHPIPE_STATUS_TOTAL_SIZE);
+            hashpipe_status_unlock_safe(st);
 
             /* block size possibly changed on new obs */
             /* TODO: what about overlap...
@@ -882,20 +882,20 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
              */
             netbuf_full = hpguppi_input_databuf_total_status(db);
             sprintf(netbuf_status, "%d/%d", netbuf_full, db->header.n_block);
-            hashpipe_status_lock_safe(&st);
-            hputs(st.buf, status_key, "waitfree");
-            hputs(st.buf, "NETBUFST", netbuf_status);
-            hashpipe_status_unlock_safe(&st);
+            hashpipe_status_lock_safe(st);
+            hputs(st->buf, status_key, "waitfree");
+            hputs(st->buf, "NETBUFST", netbuf_status);
+            hashpipe_status_unlock_safe(st);
             while ((rv=hpguppi_input_databuf_wait_free(db, lblock->block_idx))
                     != HASHPIPE_OK) {
                 if (rv==HASHPIPE_TIMEOUT) {
                     waiting=1;
                     netbuf_full = hpguppi_input_databuf_total_status(db);
                     sprintf(netbuf_status, "%d/%d", netbuf_full, db->header.n_block);
-                    hashpipe_status_lock_safe(&st);
-                    hputs(st.buf, status_key, "blocked");
-                    hputs(st.buf, "NETBUFST", netbuf_status);
-                    hashpipe_status_unlock_safe(&st);
+                    hashpipe_status_lock_safe(st);
+                    hputs(st->buf, status_key, "blocked");
+                    hputs(st->buf, "NETBUFST", netbuf_status);
+                    hashpipe_status_unlock_safe(st);
                     continue;
                 } else {
                     hashpipe_error("hpguppi_net_thread",
@@ -903,9 +903,9 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                     pthread_exit(NULL);
                 }
             }
-            hashpipe_status_lock_safe(&st);
-            hputs(st.buf, status_key, "receiving");
-            hashpipe_status_unlock_safe(&st);
+            hashpipe_status_lock_safe(st);
+            hputs(st->buf, status_key, "receiving");
+            hashpipe_status_unlock_safe(st);
 
             memcpy(curheader, status_buf, HASHPIPE_STATUS_TOTAL_SIZE);
             //if (baseband_packets) { memset(curdata, 0, block_size); }

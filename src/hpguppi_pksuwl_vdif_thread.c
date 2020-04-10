@@ -482,7 +482,7 @@ init(hashpipe_thread_args_t *args)
   hpguppi_input_databuf_t *dbin  = (hpguppi_input_databuf_t *)args->ibuf;
   const char * thread_name = args->thread_desc->name;
   const char * status_key = args->thread_desc->skey;
-  hashpipe_status_t st = args->st;
+  hashpipe_status_t *st = &args->st;
 
   // Non-network essential paramaters
   int blocsize=PKSUWL_BLOCK_DATA_SIZE;
@@ -536,12 +536,12 @@ init(hashpipe_thread_args_t *args)
   }
 
   // Get OBSFREQ and OBSBW first since their absence is a fatal error
-  hashpipe_status_lock_safe(&st);
+  hashpipe_status_lock_safe(st);
   {
-    hgetr8(st.buf, "OBSFREQ", &obsfreq);
-    hgetr8(st.buf, "OBSBW", &obsbw);
+    hgetr8(st->buf, "OBSFREQ", &obsfreq);
+    hgetr8(st->buf, "OBSBW", &obsbw);
   }
-  hashpipe_status_unlock_safe(&st);
+  hashpipe_status_unlock_safe(st);
 
   if(obsfreq == 0.0) {
     hashpipe_error(thread_name, "OBSFREQ not found but is required");
@@ -553,41 +553,39 @@ init(hashpipe_thread_args_t *args)
   }
 
   // Set default values for strings
-  strcpy(dest_ip, "0.0.0.0");
   strcpy(obs_mode, "RAW");
 
-  hashpipe_status_lock_safe(&st);
+  hashpipe_status_lock_safe(st);
   {
     // Get info from status buffer if present (no change if not present)
-    hgeti4(st.buf, "BLOCSIZE", &blocsize);
-    hgeti4(st.buf, "DIRECTIO", &directio);
-    //hgeti4(st.buf, "NBITS", &nbits); // Force to 16 for UWL
-    hgeti4(st.buf, "NPOL", &npol);
-    //hgeti4(st.buf, "OBSNCHAN", &obsnchan); // Force to 1 for UWL
-    hgeti4(st.buf, "OVERLAP", &overlap);
-    hgets(st.buf, "OBS_MODE", 80, obs_mode);
-    hgets(st.buf, "DESTIP", 80, dest_ip);
+    hgeti4(st->buf, "BLOCSIZE", &blocsize);
+    hgeti4(st->buf, "DIRECTIO", &directio);
+    //hgeti4(st->buf, "NBITS", &nbits); // Force to 16 for UWL
+    hgeti4(st->buf, "NPOL", &npol);
+    //hgeti4(st->buf, "OBSNCHAN", &obsnchan); // Force to 1 for UWL
+    hgeti4(st->buf, "OVERLAP", &overlap);
+    hgets(st->buf, "OBS_MODE", 80, obs_mode);
 
     // Calculate TBIN from OBSNCHAN and OBSBW
     tbin = fabs(obsnchan / obsbw) / 1e6;
 
     // Store info in status buffer (in case it was not there before).
-    hputi4(st.buf, "BLOCSIZE", blocsize);
-    hputi4(st.buf, "DIRECTIO", directio);
-    hputi4(st.buf, "NBITS", nbits);
-    hputi4(st.buf, "NPOL", npol);
-    hputr8(st.buf, "CHAN_BW", obsbw);     // CHAN_BW == OBSBW
-    hputi4(st.buf, "OBSNCHAN", obsnchan); // Force to 1 for UWL
-    hputi4(st.buf, "OVERLAP", overlap);
+    hputi4(st->buf, "BLOCSIZE", blocsize);
+    hputi4(st->buf, "DIRECTIO", directio);
+    hputi4(st->buf, "NBITS", nbits);
+    hputi4(st->buf, "NPOL", npol);
+    hputr8(st->buf, "CHAN_BW", obsbw);     // CHAN_BW == OBSBW
+    hputi4(st->buf, "OBSNCHAN", obsnchan); // Force to 1 for UWL
+    hputi4(st->buf, "OVERLAP", overlap);
     // Force PKTFMT to be "VDIF"
-    hputs(st.buf, "PKTFMT", "VDIF");
-    hputr8(st.buf, "TBIN", tbin);
-    hputs(st.buf, "OBS_MODE", obs_mode);
-    hputi4(st.buf, "NDROP", 0);
+    hputs(st->buf, "PKTFMT", "VDIF");
+    hputr8(st->buf, "TBIN", tbin);
+    hputs(st->buf, "OBS_MODE", obs_mode);
+    hputi4(st->buf, "NDROP", 0);
     // Set status_key to init
-    hputs(st.buf, status_key, "init");
+    hputs(st->buf, status_key, "init");
   }
-  hashpipe_status_unlock_safe(&st);
+  hashpipe_status_unlock_safe(st);
 
   // Success!
   return 0;
@@ -601,7 +599,7 @@ run(hashpipe_thread_args_t * args)
   // Our input and output buffers happen to be a hpguppi_input_databuf
   hpguppi_input_databuf_t *dbin  = (hpguppi_input_databuf_t *)args->ibuf;
   hpguppi_input_databuf_t *dbout = (hpguppi_input_databuf_t *)args->obuf;
-  hashpipe_status_t st = args->st;
+  hashpipe_status_t *st = &args->st;
   const char * thread_name = args->thread_desc->name;
   const char * status_key = args->thread_desc->skey;
 
@@ -609,11 +607,11 @@ run(hashpipe_thread_args_t * args)
   enum run_states state = IDLE;
   unsigned waiting = 0;
   // Update status_key with idle state
-  hashpipe_status_lock_safe(&st);
+  hashpipe_status_lock_safe(st);
   {
-    hputs(st.buf, status_key, "idle");
+    hputs(st->buf, status_key, "idle");
   }
-  hashpipe_status_unlock_safe(&st);
+  hashpipe_status_unlock_safe(st);
 
   // Misc counters, etc
   int i;
@@ -685,11 +683,11 @@ run(hashpipe_thread_args_t * args)
   // Initialize working blocks
   for(wblk_idx=0; wblk_idx<2; wblk_idx++) {
     init_block_info(wblk+wblk_idx, dbout, wblk_idx, wblk_idx);
-    wait_for_block_free(wblk+wblk_idx, &st, status_key);
+    wait_for_block_free(wblk+wblk_idx, st, status_key);
   }
 
   // Wait for ibvpkt thread to be running, then it's OK to add/remove flows.
-  hpguppi_ibvpkt_wait_running(&st);
+  hpguppi_ibvpkt_wait_running(st);
 
   // Initial ts_stop_recv
   clock_gettime(CLOCK_MONOTONIC_RAW, &ts_stop_recv);
@@ -722,7 +720,7 @@ run(hashpipe_thread_args_t * args)
         ts_last_update = ts_stop_recv;
 
         // Update status buffer
-        update_status_buffer_periodic(&st,
+        update_status_buffer_periodic(st,
             hpguppi_input_databuf_total_status(dbout), dbout->header.n_block,
             bytes_received, pkts_received, ns_processed,
             dest_ip_str_new, sizeof(dest_ip_str_new), &bind_port,
@@ -783,24 +781,24 @@ run(hashpipe_thread_args_t * args)
 
           // Store DESTIP (e.g. to overwrite invalid external request) and
           // update DAQSTATE.
-          hashpipe_status_lock_safe(&st);
+          hashpipe_status_lock_safe(st);
           {
-            hputs(st.buf, "DESTIP", dest_ip_str_new);
-            hputs(st.buf, "DAQSTATE", state == IDLE   ? "IDLE"
-                                    : state == LISTEN ? "LISTEN" : "RECORD");
+            hputs(st->buf, "DESTIP", dest_ip_str_new);
+            hputs(st->buf, "DAQSTATE", state == IDLE   ? "IDLE"   :
+                                       state == LISTEN ? "LISTEN" : "RECORD");
           }
-          hashpipe_status_unlock_safe(&st);
+          hashpipe_status_unlock_safe(st);
         } // DESTIP changed
       } // End 50 ms update
 
       // Set status field to "waiting" if we are not getting packets, threads
       // are still running, state is not IDLE, and waiting it not already set
       if (timed_out && run_threads() && state != IDLE && !waiting) {
-        hashpipe_status_lock_safe(&st);
+        hashpipe_status_lock_safe(st);
         {
-          hputs(st.buf, status_key, "waiting");
+          hputs(st->buf, status_key, "waiting");
         }
-        hashpipe_status_unlock_safe(&st);
+        hashpipe_status_unlock_safe(st);
         waiting=1;
       }
     } while(timed_out && run_threads()); // end wait for data loop
@@ -827,11 +825,11 @@ run(hashpipe_thread_args_t * args)
 
     // Got packet(s)!  Update status if needed.
     if (waiting) {
-      hashpipe_status_lock_safe(&st);
+      hashpipe_status_lock_safe(st);
       {
-        hputs(st.buf, status_key, "receiving");
+        hputs(st->buf, status_key, "receiving");
       }
-      hashpipe_status_unlock_safe(&st);
+      hashpipe_status_unlock_safe(st);
       waiting=0;
     }
 
@@ -878,10 +876,10 @@ run(hashpipe_thread_args_t * args)
         // Increment last working block
         increment_block(&wblk[1], pkt_blk_num);
         // Wait for new databuf data block to be free
-        wait_for_block_free(&wblk[1], &st, status_key);
+        wait_for_block_free(&wblk[1], st, status_key);
 
         // Update status buffer for new wblk[0]
-        state = update_status_buffer_new_block(&st, wblk[0].block_num);
+        state = update_status_buffer_new_block(st, wblk[0].block_num);
       }
       // Check for PKTIDX discontinuity
       else if(pkt_blk_num < wblk[0].block_num - 1
@@ -901,7 +899,7 @@ run(hashpipe_thread_args_t * args)
         }
 
         // Update status buffer for newly reset wblk[0]
-        state = update_status_buffer_new_block(&st, wblk[0].block_num);
+        state = update_status_buffer_new_block(st, wblk[0].block_num);
 
         // Continue on to next packet
         continue;

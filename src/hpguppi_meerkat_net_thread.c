@@ -566,29 +566,29 @@ static int init(hashpipe_thread_args_t *args)
   strcpy(net_params->ifname, "eth4");
   net_params->port = 7148;
 
-  hashpipe_status_t st = args->st;
+  hashpipe_status_t *st = &args->st;
 
-  hashpipe_status_lock_safe(&st);
+  hashpipe_status_lock_safe(st);
   {
     // Get info from status buffer if present (no change if not present)
-    hgets(st.buf,  "BINDHOST", sizeof(net_params->ifname), net_params->ifname);
-    hgeti4(st.buf, "BINDPORT", &net_params->port);
-    hgeti4(st.buf, "BLOCSIZE", &blocsize);
-    hgeti4(st.buf, "DIRECTIO", &directio);
-    hgeti4(st.buf, "NANTS", &nants);
-    hgeti4(st.buf, "NBITS", &nbits);
-    hgeti4(st.buf, "NPOL", &npol);
-    hgetr8(st.buf, "OBSFREQ", &obsfreq);
-    hgetr8(st.buf, "OBSBW", &obsbw);
-    hgetr8(st.buf, "CHAN_BW", &chan_bw);
-    hgeti4(st.buf, "OBSNCHAN", &obsnchan);
-    hgeti4(st.buf, "OVERLAP", &overlap);
-    hgets(st.buf, "OBS_MODE", 80, obs_mode);
+    hgets(st->buf,  "BINDHOST", sizeof(net_params->ifname), net_params->ifname);
+    hgeti4(st->buf, "BINDPORT", &net_params->port);
+    hgeti4(st->buf, "BLOCSIZE", &blocsize);
+    hgeti4(st->buf, "DIRECTIO", &directio);
+    hgeti4(st->buf, "NANTS", &nants);
+    hgeti4(st->buf, "NBITS", &nbits);
+    hgeti4(st->buf, "NPOL", &npol);
+    hgetr8(st->buf, "OBSFREQ", &obsfreq);
+    hgetr8(st->buf, "OBSBW", &obsbw);
+    hgetr8(st->buf, "CHAN_BW", &chan_bw);
+    hgeti4(st->buf, "OBSNCHAN", &obsnchan);
+    hgeti4(st->buf, "OVERLAP", &overlap);
+    hgets(st->buf, "OBS_MODE", 80, obs_mode);
 
     // Prevent div-by-zero errors (should never happen...)
     if(nants == 0) {
       nants = 1;
-      hputi4(st.buf, "NANTS", nants);
+      hputi4(st->buf, "NANTS", nants);
     }
 
     // If CHAN_BW is zero, set to default value (1 MHz)
@@ -602,28 +602,28 @@ static int init(hashpipe_thread_args_t *args)
 
     // Store bind host/port info etc in status buffer (in case it was not there
     // before).
-    hputs(st.buf, "BINDHOST", net_params->ifname);
-    hputi4(st.buf, "BINDPORT", net_params->port);
-    hputi4(st.buf, "BLOCSIZE", blocsize);
-    hputi4(st.buf, "DIRECTIO", directio);
-    hputi4(st.buf, "NBITS", nbits);
-    hputi4(st.buf, "NPOL", npol);
-    hputr8(st.buf, "OBSBW", obsbw);
-    hputr8(st.buf, "CHAN_BW", chan_bw);
-    hputi4(st.buf, "OBSNCHAN", obsnchan);
-    hputi4(st.buf, "OVERLAP", overlap);
+    hputs(st->buf, "BINDHOST", net_params->ifname);
+    hputi4(st->buf, "BINDPORT", net_params->port);
+    hputi4(st->buf, "BLOCSIZE", blocsize);
+    hputi4(st->buf, "DIRECTIO", directio);
+    hputi4(st->buf, "NBITS", nbits);
+    hputi4(st->buf, "NPOL", npol);
+    hputr8(st->buf, "OBSBW", obsbw);
+    hputr8(st->buf, "CHAN_BW", chan_bw);
+    hputi4(st->buf, "OBSNCHAN", obsnchan);
+    hputi4(st->buf, "OVERLAP", overlap);
     // Force PKTFMT to be "SPEAD"
-    hputs(st.buf, "PKTFMT", "SPEAD");
-    hputr8(st.buf, "TBIN", tbin);
-    hputs(st.buf, "OBS_MODE", obs_mode);
-    hputs(st.buf, "DESTIP", dest_ip);
+    hputs(st->buf, "PKTFMT", "SPEAD");
+    hputr8(st->buf, "TBIN", tbin);
+    hputs(st->buf, "OBS_MODE", obs_mode);
+    hputs(st->buf, "DESTIP", dest_ip);
     // Init stats fields to 0
-    hputu8(st.buf, "NPKTS", 0);
-    hputi4(st.buf, "NDROP", 0);
+    hputu8(st->buf, "NPKTS", 0);
+    hputi4(st->buf, "NDROP", 0);
     // Set status_key to init
-    hputs(st.buf, status_key, "init");
+    hputs(st->buf, status_key, "init");
   }
-  hashpipe_status_unlock_safe(&st);
+  hashpipe_status_unlock_safe(st);
 
   // Store net_params pointer in args
   args->user_data = net_params;
@@ -640,7 +640,7 @@ int debug_i=0, debug_j=0;
   // Local aliases to shorten access to args fields
   // Our output buffer happens to be a hpguppi_input_databuf
   hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->obuf;
-  hashpipe_status_t st = args->st;
+  hashpipe_status_t *st = &args->st;
   const char * thread_name = args->thread_desc->name;
   const char * status_key = args->thread_desc->skey;
 
@@ -666,11 +666,11 @@ int debug_i=0, debug_j=0;
   enum run_states state = IDLE;
   unsigned waiting = 0;
   // Update status_key with idle state
-  hashpipe_status_lock_safe(&st);
+  hashpipe_status_lock_safe(st);
   {
-    hputs(st.buf, status_key, "idle");
+    hputs(st->buf, status_key, "idle");
   }
-  hashpipe_status_unlock_safe(&st);
+  hashpipe_status_unlock_safe(st);
 
   // Misc counters, etc
   int rv;
@@ -779,20 +779,20 @@ int debug_i=0, debug_j=0;
   // Initialize working blocks
   for(wblk_idx=0; wblk_idx<2; wblk_idx++) {
     init_block_info(wblk+wblk_idx, db, wblk_idx, wblk_idx, 0);
-    wait_for_block_free(wblk+wblk_idx, &st, status_key);
+    wait_for_block_free(wblk+wblk_idx, st, status_key);
   }
 
   // Get any obs info from status buffer, store values
-  hashpipe_status_lock_safe(&st);
+  hashpipe_status_lock_safe(st);
   {
     // Read (no change if not present)
-    hgetu4(st.buf, "FENCHAN", &obs_info.fenchan);
-    hgetu4(st.buf, "NANTS",   &obs_info.nants);
-    hgetu4(st.buf, "NSTRM",   &obs_info.nstrm);
-    hgetu4(st.buf, "HNTIME",  &obs_info.hntime);
-    hgetu4(st.buf, "HNCHAN",  &obs_info.hnchan);
-    hgetu8(st.buf, "HCLOCKS", &obs_info.hclocks);
-    hgeti4(st.buf, "SCHAN",   &obs_info.schan);
+    hgetu4(st->buf, "FENCHAN", &obs_info.fenchan);
+    hgetu4(st->buf, "NANTS",   &obs_info.nants);
+    hgetu4(st->buf, "NSTRM",   &obs_info.nstrm);
+    hgetu4(st->buf, "HNTIME",  &obs_info.hntime);
+    hgetu4(st->buf, "HNCHAN",  &obs_info.hnchan);
+    hgetu8(st->buf, "HCLOCKS", &obs_info.hclocks);
+    hgeti4(st->buf, "SCHAN",   &obs_info.schan);
 
     // If obs_info is valid
     if(mk_obs_info_valid(obs_info)) {
@@ -803,19 +803,19 @@ int debug_i=0, debug_j=0;
     }
 
     // Write (store default/invlid values if not present)
-    hputu4(st.buf, "FENCHAN", obs_info.fenchan);
-    hputu4(st.buf, "NANTS",   obs_info.nants);
-    hputu4(st.buf, "NSTRM",   obs_info.nstrm);
-    hputu4(st.buf, "HNTIME",  obs_info.hntime);
-    hputu4(st.buf, "HNCHAN",  obs_info.hnchan);
-    hputu8(st.buf, "HCLOCKS", obs_info.hclocks);
-    hputi4(st.buf, "SCHAN",   obs_info.schan);
+    hputu4(st->buf, "FENCHAN", obs_info.fenchan);
+    hputu4(st->buf, "NANTS",   obs_info.nants);
+    hputu4(st->buf, "NSTRM",   obs_info.nstrm);
+    hputu4(st->buf, "HNTIME",  obs_info.hntime);
+    hputu4(st->buf, "HNCHAN",  obs_info.hnchan);
+    hputu8(st->buf, "HCLOCKS", obs_info.hclocks);
+    hputi4(st->buf, "SCHAN",   obs_info.schan);
 
-    hputu4(st.buf, "OBSNCHAN", obsnchan);
-    hputu4(st.buf, "PIPERBLK", pktidx_per_block);
-    hputi4(st.buf, "BLOCSIZE", eff_block_size);
+    hputu4(st->buf, "OBSNCHAN", obsnchan);
+    hputu4(st->buf, "PIPERBLK", pktidx_per_block);
+    hputi4(st->buf, "BLOCSIZE", eff_block_size);
   }
-  hashpipe_status_unlock_safe(&st);
+  hashpipe_status_unlock_safe(st);
 
   // Set up ibverbs context
   strncpy(hibv_ctx->interface_name, net_params->ifname, IFNAMSIZ);
@@ -827,14 +827,14 @@ int debug_i=0, debug_j=0;
   hibv_ctx->nqp          = DEFAULT_NUM_QP;
 
   // Get params from status buffer (if present)
-  hashpipe_status_lock_safe(&st);
+  hashpipe_status_lock_safe(st);
   {
     // Read (no change if not present)
-    hgetu4(st.buf, "RPKTNUM", &hibv_ctx->recv_pkt_num);
-    hgetu4(st.buf, "MAXFLOWS", &hibv_ctx->max_flows);
-    hgetu4(st.buf, "NUM_QP", &hibv_ctx->nqp);
+    hgetu4(st->buf, "RPKTNUM", &hibv_ctx->recv_pkt_num);
+    hgetu4(st->buf, "MAXFLOWS", &hibv_ctx->max_flows);
+    hgetu4(st->buf, "NUM_QP", &hibv_ctx->nqp);
   }
-  hashpipe_status_unlock_safe(&st);
+  hashpipe_status_unlock_safe(st);
 
   // Initialize ibverbs
   if(hashpipe_ibv_init(hibv_ctx)) {
@@ -876,19 +876,19 @@ int debug_i=0, debug_j=0;
 
       // Check dest_ip/port in status buffer, get obs info parameters, and, if
       // needed, update DAQPULSE
-      hashpipe_status_lock_safe(&st);
+      hashpipe_status_lock_safe(st);
       {
         // Get DESTIP address and BINDPORT (a historical misnomer for DESTPORT)
-        hgets(st.buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
-        hgeti4(st.buf, "BINDPORT", &net_params->port);
+        hgets(st->buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
+        hgeti4(st->buf, "BINDPORT", &net_params->port);
 
-        hgetu4(st.buf, "FENCHAN", &obs_info.fenchan);
-        hgetu4(st.buf, "NANTS",   &obs_info.nants);
-        hgetu4(st.buf, "NSTRM",   &obs_info.nstrm);
-        hgetu4(st.buf, "HNTIME",  &obs_info.hntime);
-        hgetu4(st.buf, "HNCHAN",  &obs_info.hnchan);
-        hgetu8(st.buf, "HCLOCKS", &obs_info.hclocks);
-        hgeti4(st.buf, "SCHAN",   &obs_info.schan);
+        hgetu4(st->buf, "FENCHAN", &obs_info.fenchan);
+        hgetu4(st->buf, "NANTS",   &obs_info.nants);
+        hgetu4(st->buf, "NSTRM",   &obs_info.nstrm);
+        hgetu4(st->buf, "HNTIME",  &obs_info.hntime);
+        hgetu4(st->buf, "HNCHAN",  &obs_info.hnchan);
+        hgetu8(st->buf, "HCLOCKS", &obs_info.hclocks);
+        hgeti4(st->buf, "SCHAN",   &obs_info.schan);
 
         // If obs_info is valid
         if(mk_obs_info_valid(obs_info)) {
@@ -897,17 +897,17 @@ int debug_i=0, debug_j=0;
           pktidx_per_block = mk_pktidx_per_block(BLOCK_DATA_SIZE, obs_info);
           eff_block_size = mk_block_size(BLOCK_DATA_SIZE, obs_info);
 
-          hputu4(st.buf, "OBSNCHAN", obsnchan);
-          hputu4(st.buf, "PIPERBLK", pktidx_per_block);
-          hputi4(st.buf, "BLOCSIZE", eff_block_size);
+          hputu4(st->buf, "OBSNCHAN", obsnchan);
+          hputu4(st->buf, "PIPERBLK", pktidx_per_block);
+          hputi4(st->buf, "BLOCSIZE", eff_block_size);
         }
 
         if(curtime != lasttime) {
           lasttime = curtime;
-          hputs(st.buf,  "DAQPULSE", timestr);
+          hputs(st->buf,  "DAQPULSE", timestr);
         }
       }
-      hashpipe_status_unlock_safe(&st);
+      hashpipe_status_unlock_safe(st);
 
       // TODO Parse the A.B.C.D+N notation
       if((pchar = strchr(dest_ip_str, '+'))) {
@@ -953,12 +953,12 @@ int debug_i=0, debug_j=0;
         state = LISTEN;
         waiting = 1;
         // Update DAQSTATE and status_key
-        hashpipe_status_lock_safe(&st);
+        hashpipe_status_lock_safe(st);
         {
-          hputs(st.buf, "DAQSTATE", "LISTEN");
-          hputs(st.buf, status_key, "waiting");
+          hputs(st->buf, "DAQSTATE", "LISTEN");
+          hputs(st->buf, status_key, "waiting");
         }
-        hashpipe_status_unlock_safe(&st);
+        hashpipe_status_unlock_safe(st);
       }
 
       // Will exit if thread has been cancelled
@@ -1014,22 +1014,22 @@ int debug_i=0, debug_j=0;
         }
         ts_prev_phys = ts_curr_phys;
 
-        hashpipe_status_lock_safe(&st);
+        hashpipe_status_lock_safe(st);
         {
-          hputs(st.buf, "DAQPULSE", timestr);
+          hputs(st->buf, "DAQPULSE", timestr);
 
-          hgetu8(st.buf, "NPKTS", &u64tmp);
+          hgetu8(st->buf, "NPKTS", &u64tmp);
           u64tmp += packet_count; packet_count = 0;
-          hputu8(st.buf, "NPKTS", u64tmp);
+          hputu8(st->buf, "NPKTS", u64tmp);
 
-          hputr4(st.buf, "PHYSGBPS", physgbps);
-          hputr4(st.buf, "PHYSPKPS", physpkps);
+          hputr4(st->buf, "PHYSGBPS", physgbps);
+          hputr4(st->buf, "PHYSPKPS", physpkps);
 
           // Get DESTIP to see if we should go to IDLE state
-          hgets(st.buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
+          hgets(st->buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
           if((pchar = strchr(dest_ip_str, '+'))) *pchar = '\0';
         }
-        hashpipe_status_unlock_safe(&st);
+        hashpipe_status_unlock_safe(st);
 
         // If DESTIP is invalid or zero, go to IDLE state.  Invalid here just
         // means that it fails to parse, not that it is incorrect or otherwise
@@ -1056,30 +1056,30 @@ int debug_i=0, debug_j=0;
           eff_block_size = 0;
 
           // Update DAQSTATE, status_key, and obs_info params
-          hashpipe_status_lock_safe(&st);
+          hashpipe_status_lock_safe(st);
           {
-            hputs(st.buf, "DAQSTATE", "IDLE");
-            hputs(st.buf, status_key, "idle");
+            hputs(st->buf, "DAQSTATE", "IDLE");
+            hputs(st->buf, status_key, "idle");
             // These must be reset to valid values by external actor
-            hputu4(st.buf, "FENCHAN", obs_info.fenchan);
-            hputu4(st.buf, "NANTS",   obs_info.nants);
-            hputu4(st.buf, "NSTRM",   obs_info.nstrm);
-            hputu4(st.buf, "HNTIME",  obs_info.hntime);
-            hputu4(st.buf, "HNCHAN",  obs_info.hnchan);
-            hputu8(st.buf, "HCLOCKS", obs_info.hclocks);
-            hputi4(st.buf, "SCHAN",   obs_info.schan);
+            hputu4(st->buf, "FENCHAN", obs_info.fenchan);
+            hputu4(st->buf, "NANTS",   obs_info.nants);
+            hputu4(st->buf, "NSTRM",   obs_info.nstrm);
+            hputu4(st->buf, "HNTIME",  obs_info.hntime);
+            hputu4(st->buf, "HNCHAN",  obs_info.hnchan);
+            hputu8(st->buf, "HCLOCKS", obs_info.hclocks);
+            hputi4(st->buf, "SCHAN",   obs_info.schan);
           }
-          hashpipe_status_unlock_safe(&st);
+          hashpipe_status_unlock_safe(st);
         }
       } // curtime != lasttime
 
       // Set status field to "waiting" if we are not getting packets
       if (!GOT_PACKET && run_threads() && state != IDLE && !waiting) {
-        hashpipe_status_lock_safe(&st);
+        hashpipe_status_lock_safe(st);
         {
-          hputs(st.buf, status_key, "waiting");
+          hputs(st->buf, status_key, "waiting");
         }
-        hashpipe_status_unlock_safe(&st);
+        hashpipe_status_unlock_safe(st);
         waiting=1;
       }
 
@@ -1103,11 +1103,11 @@ int debug_i=0, debug_j=0;
 
     // Got packet(s)!  Update status if needed.
     if (waiting) {
-      hashpipe_status_lock_safe(&st);
+      hashpipe_status_lock_safe(st);
       {
-        hputs(st.buf, status_key, "receiving");
+        hputs(st->buf, status_key, "receiving");
       }
-      hashpipe_status_unlock_safe(&st);
+      hashpipe_status_unlock_safe(st);
       waiting=0;
     }
 
@@ -1177,30 +1177,30 @@ printf("\n");
           ns_processed_net = 0;
         }
 
-        hashpipe_status_lock_safe(&st);
+        hashpipe_status_lock_safe(st);
         {
-          hputi8(st.buf, "PKTIDX", pkt_seq_num);
-          hputi8(st.buf, "PKTBLK", pkt_blk_num); // TODO do we want/need this?
-          hputi4(st.buf, "BLOCSIZE", eff_block_size);
+          hputi8(st->buf, "PKTIDX", pkt_seq_num);
+          hputi8(st->buf, "PKTBLK", pkt_blk_num); // TODO do we want/need this?
+          hputi4(st->buf, "BLOCSIZE", eff_block_size);
 
-          hgetu8(st.buf, "PKTSTART", &start_seq_num);
+          hgetu8(st->buf, "PKTSTART", &start_seq_num);
           start_seq_num -= start_seq_num % pktidx_per_block;
-          hputu8(st.buf, "PKTSTART", start_seq_num);
+          hputu8(st->buf, "PKTSTART", start_seq_num);
 
-          hgetr8(st.buf, "DWELL", &dwell_seconds);
-          hputr8(st.buf, "DWELL", dwell_seconds); // In case it wasn't there
+          hgetr8(st->buf, "DWELL", &dwell_seconds);
+          hputr8(st->buf, "DWELL", dwell_seconds); // In case it wasn't there
 
-          hputr4(st.buf, "NETGBPS", netgbps);
-          hputr4(st.buf, "NETPKPS", netpkps);
+          hputr4(st->buf, "NETGBPS", netgbps);
+          hputr4(st->buf, "NETPKPS", netpkps);
 
           // Get CHAN_BW and calculate/store TBIN
-          hgetr8(st.buf, "CHAN_BW", &chan_bw);
+          hgetr8(st->buf, "CHAN_BW", &chan_bw);
           // If CHAN_BW is zero, set to default value (1 MHz)
           if(chan_bw == 0.0) {
             chan_bw = 1.0;
           }
           tbin = 1e-6 / fabs(chan_bw);
-          hputr8(st.buf, "TBIN", tbin);
+          hputr8(st->buf, "TBIN", tbin);
 
           // Dwell blocks is equal to:
           //
@@ -1212,17 +1212,17 @@ printf("\n");
           dwell_blocks = trunc(dwell_seconds / (tbin * mk_ntime(BLOCK_DATA_SIZE, obs_info)));
 
           stop_seq_num = start_seq_num + pktidx_per_block * dwell_blocks;
-          hputi8(st.buf, "PKTSTOP", stop_seq_num);
+          hputi8(st->buf, "PKTSTOP", stop_seq_num);
 
-          hgetu8(st.buf, "NDROP", &u64tmp);
+          hgetu8(st->buf, "NDROP", &u64tmp);
           u64tmp += ndrop_total; ndrop_total = 0;
-          hputu8(st.buf, "NDROP", u64tmp);
+          hputu8(st->buf, "NDROP", u64tmp);
 
-          hgetu8(st.buf, "NLATE", &u64tmp);
+          hgetu8(st->buf, "NLATE", &u64tmp);
           u64tmp += nlate; nlate = 0;
-          hputu8(st.buf, "NLATE", u64tmp);
+          hputu8(st->buf, "NLATE", u64tmp);
         }
-        hashpipe_status_unlock_safe(&st);
+        hashpipe_status_unlock_safe(st);
       } // End status buffer block update
 
       // Manage blocks based on pkt_blk_num
@@ -1237,11 +1237,11 @@ printf("next block (%ld == %ld + 1)\n", pkt_blk_num, wblk[1].block_num);
         // Shift working blocks
         wblk[0] = wblk[1];
         // Check start/stop using wblk[0]'s first PKTIDX
-        state = check_start_stop(&st, wblk[0].block_num * pktidx_per_block);
+        state = check_start_stop(st, wblk[0].block_num * pktidx_per_block);
         // Increment last working block
         increment_block(&wblk[1], pkt_blk_num);
         // Wait for new databuf data block to be free
-        wait_for_block_free(&wblk[1], &st, status_key);
+        wait_for_block_free(&wblk[1], st, status_key);
       }
       // Check for PKTIDX discontinuity
       else if(pkt_blk_num < wblk[0].block_num - 1
@@ -1269,7 +1269,7 @@ printf("reset blocks (%ld <> [%ld - 1, %ld + 1])\n", pkt_blk_num, wblk[0].block_
         }
 
         // Check start/stop using wblk[0]'s first PKTIDX
-        state = check_start_stop(&st, wblk[0].block_num * pktidx_per_block);
+        state = check_start_stop(st, wblk[0].block_num * pktidx_per_block);
 // This happens after discontinuities (e.g. on startup), so don't warn about
 // it.
       } else if(pkt_blk_num == wblk[0].block_num - 1) {

@@ -39,15 +39,15 @@ static int init(hashpipe_thread_args_t * args)
     rawspec_callback_data_t * cb_data;
 
     hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->ibuf;
-    hashpipe_status_t st = args->st;
+    hashpipe_status_t *st = &args->st;
     const char * thread_name = args->thread_desc->name;
 
-    hashpipe_status_lock_safe(&st);
+    hashpipe_status_lock_safe(st);
     // Get Nc from OBSNCHAN
-    hgetu4(st.buf, "OBSNCHAN", &Nc);
+    hgetu4(st->buf, "OBSNCHAN", &Nc);
     // Get Nbps from NBITS
-    hgetu4(st.buf, "NBITS", &Nbps);
-    hashpipe_status_unlock_safe(&st);
+    hgetu4(st->buf, "NBITS", &Nbps);
+    hashpipe_status_unlock_safe(st);
 
     if(Nc == 0) {
       hashpipe_error(thread_name,
@@ -162,7 +162,7 @@ static void *run(hashpipe_thread_args_t * args)
     // Local aliases to shorten access to args fields
     // Our output buffer happens to be a hpguppi_input_databuf
     hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->ibuf;
-    hashpipe_status_t st = args->st;
+    hashpipe_status_t *st = &args->st;
     const char * thread_name = args->thread_desc->name;
     const char * status_key = args->thread_desc->skey;
 
@@ -196,11 +196,11 @@ static void *run(hashpipe_thread_args_t * args)
     while (run_threads()) {
 
         /* Note waiting status */
-        hashpipe_status_lock_safe(&st);
+        hashpipe_status_lock_safe(st);
 	{
-	  hputs(st.buf, status_key, "waiting");
+	  hputs(st->buf, status_key, "waiting");
 	}
-        hashpipe_status_unlock_safe(&st);
+        hashpipe_status_unlock_safe(st);
 
         /* Wait for buf to have data */
         rv = hpguppi_input_databuf_wait_filled(db, curblock);
@@ -323,9 +323,9 @@ static void *run(hashpipe_thread_args_t * args)
         if (got_packet_0) {
 
             /* Note waiting status */
-            hashpipe_status_lock_safe(&st);
-            hputs(st.buf, status_key, "writing");
-            hashpipe_status_unlock_safe(&st);
+            hashpipe_status_lock_safe(st);
+            hputs(st->buf, status_key, "writing");
+            hashpipe_status_unlock_safe(st);
 
 	    // If first block of a GPU input buffer
 	    if(rawspec_block_idx % ctx->Nb == 0) {

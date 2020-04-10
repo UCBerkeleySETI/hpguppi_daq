@@ -238,7 +238,7 @@ struct net_params {
 static int init(hashpipe_thread_args_t *args)
 {
   // Local aliases to shorten access to args fields
-  hashpipe_status_t st = args->st;
+  hashpipe_status_t *st = &args->st;
   const char * thread_name = args->thread_desc->name;
   const char * status_key = args->thread_desc->skey;
 
@@ -264,13 +264,13 @@ static int init(hashpipe_thread_args_t *args)
   hibv_ctx->max_flows = DEFAULT_MAX_FLOWS;
   hibv_ctx->nqp = DEFAULT_NUM_QP;
 
-  hashpipe_status_lock_safe(&st);
+  hashpipe_status_lock_safe(st);
   {
     // Get info from status buffer if present (no change if not present)
-    hgets(st.buf,  "BINDHOST",
+    hgets(st->buf,  "BINDHOST",
         sizeof(hibv_ctx->interface_name), hibv_ctx->interface_name);
-    hgeti4(st.buf, "BINDPORT", &net_params->port);
-    hgetu4(st.buf, "MAXFLOWS", &hibv_ctx->max_flows);
+    hgeti4(st->buf, "BINDPORT", &net_params->port);
+    hgetu4(st->buf, "MAXFLOWS", &hibv_ctx->max_flows);
 
     // Sanity checks
     if(hibv_ctx->max_flows == 0) {
@@ -279,19 +279,19 @@ static int init(hashpipe_thread_args_t *args)
 
     // Store bind host/port info etc in status buffer (in case it was not there
     // before).
-    hputs(st.buf, "BINDHOST", hibv_ctx->interface_name);
-    hputi4(st.buf, "BINDPORT", net_params->port);
-    hputs(st.buf, "DESTIP", dest_ip);
-    hputu4(st.buf, "MAXFLOWS", hibv_ctx->max_flows);
+    hputs(st->buf, "BINDHOST", hibv_ctx->interface_name);
+    hputi4(st->buf, "BINDPORT", net_params->port);
+    hputs(st->buf, "DESTIP", dest_ip);
+    hputu4(st->buf, "MAXFLOWS", hibv_ctx->max_flows);
 
-    hputu8(st.buf, "PKTPKTS", 0);
+    hputu8(st->buf, "PKTPKTS", 0);
     // PKTBLKIN is the absolute block number of the next block to be marked
     // filled.
-    hputu8(st.buf, "PKTBLKIN", 0);
+    hputu8(st->buf, "PKTBLKIN", 0);
     // Set status_key to init
-    hputs(st.buf, status_key, "init");
+    hputs(st->buf, status_key, "init");
   }
-  hashpipe_status_unlock_safe(&st);
+  hashpipe_status_unlock_safe(st);
 
   // Calculate total number of receive packets per block.  This is the number
   // of hashpipe_recv_pkt and ibv_sge elements that we need to allocate.
@@ -413,7 +413,7 @@ int debug_i=0, debug_j=0;
   // Local aliases to shorten access to args fields
   // Our output buffer happens to be a hpguppi_input_databuf
   hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->obuf;
-  hashpipe_status_t st = args->st;
+  hashpipe_status_t *st = &args->st;
   const char * thread_name = args->thread_desc->name;
   const char * status_key = args->thread_desc->skey;
   struct net_params *net_params = (struct net_params *)args->user_data;
@@ -473,7 +473,7 @@ int debug_i=0, debug_j=0;
   // Wait until the first three blocks are marked as free
   // (should already be free)
   for(i=0; i<3; i++) {
-    wait_for_block_free(db, (curblk+i) % N_INPUT_BLOCKS, &st, status_key);
+    wait_for_block_free(db, (curblk+i) % N_INPUT_BLOCKS, st, status_key);
   }
 
   // send_mr_size and send_mr_buf are set in init().
@@ -609,12 +609,12 @@ int debug_i=0, debug_j=0;
 #endif
 
   // Get DESTIP and update status_key with running state
-  hashpipe_status_lock_safe(&st);
+  hashpipe_status_lock_safe(st);
   {
-    hgets(st.buf,  "DESTIP", sizeof(dest_ip_stream_str), dest_ip_stream_str);
-    hputs(st.buf, status_key, "running");
+    hgets(st->buf,  "DESTIP", sizeof(dest_ip_stream_str), dest_ip_stream_str);
+    hputs(st->buf, status_key, "running");
   }
-  hashpipe_status_unlock_safe(&st);
+  hashpipe_status_unlock_safe(st);
 
   // Main loop
   while (run_threads()) {
@@ -646,17 +646,17 @@ int debug_i=0, debug_j=0;
       sprintf(pktbuf_status, "%d/%d", pktbuf_full, db->header.n_block);
 
       // Update status buffer fields, get dest_ip
-      hashpipe_status_lock_safe(&st);
+      hashpipe_status_lock_safe(st);
       {
-        hputu8(st.buf, "PKTBLKIN", curblk);
-        hputs(st.buf, "PKTBUFST", pktbuf_status);
-        hputu8(st.buf, "PKTPKTS", packet_count);
+        hputu8(st->buf, "PKTBLKIN", curblk);
+        hputs(st->buf, "PKTBUFST", pktbuf_status);
+        hputu8(st->buf, "PKTPKTS", packet_count);
 
         // Get DESTIP address
-        hgets(st.buf,  "DESTIP",
+        hgets(st->buf,  "DESTIP",
             sizeof(dest_ip_stream_str_new), dest_ip_stream_str_new);
       }
-      hashpipe_status_unlock_safe(&st);
+      hashpipe_status_unlock_safe(st);
 
       // If DESTIP has changed
       if(strcmp(dest_ip_stream_str, dest_ip_stream_str_new)) {
@@ -731,12 +731,12 @@ int debug_i=0, debug_j=0;
         } // end destip change allowed
 
         // Store (possibly unchanged) DESTIP/NSTRM
-        hashpipe_status_lock_safe(&st);
+        hashpipe_status_lock_safe(st);
         {
-          hputs(st.buf,  "DESTIP", dest_ip_stream_str);
-          hputu4(st.buf, "NSTRM", nstreams);
+          hputs(st->buf,  "DESTIP", dest_ip_stream_str);
+          hputu4(st->buf, "NSTRM", nstreams);
         }
-        hashpipe_status_unlock_safe(&st);
+        hashpipe_status_unlock_safe(st);
       } // end destip changed
     } // end 1 second update
 
@@ -802,21 +802,21 @@ int debug_i=0, debug_j=0;
         curblk++;
 
         // Wait for curblk+2 to be free
-        wait_for_block_free(db, (curblk+2) % N_INPUT_BLOCKS, &st, status_key);
+        wait_for_block_free(db, (curblk+2) % N_INPUT_BLOCKS, st, status_key);
 
         // Update PKTBLKIN/PKTPKTS in status buffer
-        hashpipe_status_lock_safe(&st);
+        hashpipe_status_lock_safe(st);
         {
-          hputu8(st.buf, "PKTBLKIN", curblk);
+          hputu8(st->buf, "PKTBLKIN", curblk);
 
 #if 0
-          hgetu8(st.buf, "PKTPKTS", &u64tmp);
+          hgetu8(st->buf, "PKTPKTS", &u64tmp);
           u64tmp += packet_count; packet_count = 0;
-          hputu8(st.buf, "PKTPKTS", u64tmp);
+          hputu8(st->buf, "PKTPKTS", u64tmp);
 #endif
-          hputu8(st.buf, "PKTPKTS", packet_count);
+          hputu8(st->buf, "PKTPKTS", packet_count);
         }
-        hashpipe_status_unlock_safe(&st);
+        hashpipe_status_unlock_safe(st);
       } // end block advance
 #endif
     } // end for each packet
@@ -832,11 +832,11 @@ int debug_i=0, debug_j=0;
   } // end main loop
 
   // Update status_key with exiting state
-  hashpipe_status_lock_safe(&st);
+  hashpipe_status_lock_safe(st);
   {
-    hputs(st.buf, status_key, "exiting");
+    hputs(st->buf, status_key, "exiting");
   }
-  hashpipe_status_unlock_safe(&st);
+  hashpipe_status_unlock_safe(st);
 
   hashpipe_info(thread_name, "exiting!");
   pthread_exit(NULL);

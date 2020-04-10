@@ -464,54 +464,54 @@ static int init(hashpipe_thread_args_t *args)
   strcpy(net_params->ifname, "eth4");
   net_params->port = 12345;
 
-  hashpipe_status_t st = args->st;
+  hashpipe_status_t *st = &args->st;
 
-  hashpipe_status_lock_safe(&st);
+  hashpipe_status_lock_safe(st);
   {
     // Get info from status buffer if present (no change if not present)
-    hgets(st.buf,  "BINDHOST", sizeof(net_params->ifname), net_params->ifname);
-    hgeti4(st.buf, "BINDPORT", &net_params->port);
-    hgeti4(st.buf, "BLOCSIZE", &blocsize);
-    hgeti4(st.buf, "DIRECTIO", &directio);
-    hgeti4(st.buf, "NBITS", &nbits);
-    hgeti4(st.buf, "NPOL", &npol);
-    hgetr8(st.buf, "OBSFERQ", &obsfreq);
-    hgetr8(st.buf, "OBSBW", &obsbw);
-    //hgeti4(st.buf, "OBSNCHAN", &obsnchan); // Force to 1 for UWL
-    hgeti4(st.buf, "OVERLAP", &overlap);
-    hgets(st.buf, "OBS_MODE", 80, obs_mode);
-    hgets(st.buf, "DESTIP", 80, dest_ip);
+    hgets(st->buf,  "BINDHOST", sizeof(net_params->ifname), net_params->ifname);
+    hgeti4(st->buf, "BINDPORT", &net_params->port);
+    hgeti4(st->buf, "BLOCSIZE", &blocsize);
+    hgeti4(st->buf, "DIRECTIO", &directio);
+    hgeti4(st->buf, "NBITS", &nbits);
+    hgeti4(st->buf, "NPOL", &npol);
+    hgetr8(st->buf, "OBSFERQ", &obsfreq);
+    hgetr8(st->buf, "OBSBW", &obsbw);
+    //hgeti4(st->buf, "OBSNCHAN", &obsnchan); // Force to 1 for UWL
+    hgeti4(st->buf, "OVERLAP", &overlap);
+    hgets(st->buf, "OBS_MODE", 80, obs_mode);
+    hgets(st->buf, "DESTIP", 80, dest_ip);
 
     // Calculate TBIN from OBSNCHAN and OBSBW
     tbin = fabs(obsnchan / obsbw) / 1e6;
 
     // Store bind host/port info etc in status buffer (in case it was not there
     // before).
-    hputs(st.buf, "BINDHOST", net_params->ifname);
-    hputi4(st.buf, "BINDPORT", net_params->port);
-    hputi4(st.buf, "BLOCSIZE", blocsize);
-    hputi4(st.buf, "DIRECTIO", directio);
-    hputi4(st.buf, "NBITS", nbits);
-    hputi4(st.buf, "NPOL", npol);
-    hputr8(st.buf, "OBSBW", obsbw);
-    hputi4(st.buf, "OBSNCHAN", obsnchan); // Force to 1 for UWL
-    hputi4(st.buf, "OVERLAP", overlap);
+    hputs(st->buf, "BINDHOST", net_params->ifname);
+    hputi4(st->buf, "BINDPORT", net_params->port);
+    hputi4(st->buf, "BLOCSIZE", blocsize);
+    hputi4(st->buf, "DIRECTIO", directio);
+    hputi4(st->buf, "NBITS", nbits);
+    hputi4(st->buf, "NPOL", npol);
+    hputr8(st->buf, "OBSBW", obsbw);
+    hputi4(st->buf, "OBSNCHAN", obsnchan); // Force to 1 for UWL
+    hputi4(st->buf, "OVERLAP", overlap);
     // Force PKTFMT to be "VDIF"
-    hputs(st.buf, "PKTFMT", "VDIF");
-    hputr8(st.buf, "TBIN", tbin);
-    hputs(st.buf, "OBS_MODE", obs_mode);
-    hputs(st.buf, "DESTIP", dest_ip);
+    hputs(st->buf, "PKTFMT", "VDIF");
+    hputr8(st->buf, "TBIN", tbin);
+    hputs(st->buf, "OBS_MODE", obs_mode);
+    hputs(st->buf, "DESTIP", dest_ip);
     // Init stats fields to 0
-    hputu8(st.buf, "NPKTS", 0);
-    hputi4(st.buf, "NDROP", 0);
+    hputu8(st->buf, "NPKTS", 0);
+    hputi4(st->buf, "NDROP", 0);
 #ifndef USE_IBVERBS
-    hputu8(st.buf, "PSPKTS", 0);
-    hputu8(st.buf, "PSDRPS", 0);
+    hputu8(st->buf, "PSPKTS", 0);
+    hputu8(st->buf, "PSDRPS", 0);
 #endif // !USE_IBVERBS
     // Set status_key to init
-    hputs(st.buf, status_key, "init");
+    hputs(st->buf, status_key, "init");
   }
-  hashpipe_status_unlock_safe(&st);
+  hashpipe_status_unlock_safe(st);
 
 #ifndef USE_IBVERBS
   // Set up pktsock
@@ -541,7 +541,7 @@ static void * run(hashpipe_thread_args_t * args)
   // Local aliases to shorten access to args fields
   // Our output buffer happens to be a hpguppi_input_databuf
   hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->obuf;
-  hashpipe_status_t st = args->st;
+  hashpipe_status_t *st = &args->st;
   const char * status_key = args->thread_desc->skey;
 
   // Get a pointer to the net_params structure allocated and initialized in
@@ -573,11 +573,11 @@ static void * run(hashpipe_thread_args_t * args)
   enum run_states state = IDLE;
   unsigned waiting = 0;
   // Update status_key with idle state
-  hashpipe_status_lock_safe(&st);
+  hashpipe_status_lock_safe(st);
   {
-    hputs(st.buf, status_key, "idle");
+    hputs(st->buf, status_key, "idle");
   }
-  hashpipe_status_unlock_safe(&st);
+  hashpipe_status_unlock_safe(st);
 
   // Misc counters, etc
   int rv;
@@ -655,7 +655,7 @@ static void * run(hashpipe_thread_args_t * args)
   // Initialize working blocks
   for(wblk_idx=0; wblk_idx<2; wblk_idx++) {
     init_block_info(wblk+wblk_idx, db, wblk_idx, wblk_idx);
-    wait_for_block_free(wblk+wblk_idx, &st, status_key);
+    wait_for_block_free(wblk+wblk_idx, st, status_key);
   }
 
 #ifdef USE_IBVERBS
@@ -668,13 +668,13 @@ static void * run(hashpipe_thread_args_t * args)
   hibv_ctx->max_flows    = DEFAULT_MAX_FLOWS;
 
   // Get params from status buffer (if present)
-  hashpipe_status_lock_safe(&st);
+  hashpipe_status_lock_safe(st);
   {
     // Read (no change if not present)
-    hgetu4(st.buf, "RPKTNUM", &hibv_ctx->recv_pkt_num);
-    hgetu4(st.buf, "MAXFLOWS", &hibv_ctx->max_flows);
+    hgetu4(st->buf, "RPKTNUM", &hibv_ctx->recv_pkt_num);
+    hgetu4(st->buf, "MAXFLOWS", &hibv_ctx->max_flows);
   }
-  hashpipe_status_unlock_safe(&st);
+  hashpipe_status_unlock_safe(st);
 
   hashpipe_info(args->thread_desc->name, "recv_pkt_num=%u max_flows=%u",
       hibv_ctx->recv_pkt_num, hibv_ctx->max_flows);
@@ -724,17 +724,17 @@ static void * run(hashpipe_thread_args_t * args)
       }
 
       // Check dest_ip/port in status buffer and, if needed, update DAQPULSE
-      hashpipe_status_lock_safe(&st);
+      hashpipe_status_lock_safe(st);
       {
         // Get DESTIP address and BINDPORT (a historical misnomer for DESTPORT)
-        hgets(st.buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
-        hgeti4(st.buf,  "BINDPORT", &net_params->port);
+        hgets(st->buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
+        hgeti4(st->buf,  "BINDPORT", &net_params->port);
         if(curtime != lasttime) {
           lasttime = curtime;
-          hputs(st.buf,  "DAQPULSE", timestr);
+          hputs(st->buf,  "DAQPULSE", timestr);
         }
       }
-      hashpipe_status_unlock_safe(&st);
+      hashpipe_status_unlock_safe(st);
 
       // If DESTIP is valid and non-zero, start listening!  Valid here just
       // means that it parses OK via inet_aton, not that it is correct and
@@ -771,12 +771,12 @@ static void * run(hashpipe_thread_args_t * args)
         state = LISTEN;
         waiting = 1;
         // Update DAQSTATE and status_key
-        hashpipe_status_lock_safe(&st);
+        hashpipe_status_lock_safe(st);
         {
-          hputs(st.buf, "DAQSTATE", "LISTEN");
-          hputs(st.buf, status_key, "waiting");
+          hputs(st->buf, "DAQSTATE", "LISTEN");
+          hputs(st->buf, status_key, "waiting");
         }
-        hashpipe_status_unlock_safe(&st);
+        hashpipe_status_unlock_safe(st);
       }
     } // end while state == IDLE
 
@@ -821,18 +821,18 @@ static void * run(hashpipe_thread_args_t * args)
         ctime_r(&curtime, timestr);
         timestr[strlen(timestr)-1] = '\0'; // Chop off trailing newline
 
-        hashpipe_status_lock_safe(&st);
+        hashpipe_status_lock_safe(st);
         {
-          hputs(st.buf, "DAQPULSE", timestr);
+          hputs(st->buf, "DAQPULSE", timestr);
 
-          hgetu8(st.buf, "NPKTS", &u64tmp);
+          hgetu8(st->buf, "NPKTS", &u64tmp);
           u64tmp += packet_count; packet_count = 0;
-          hputu8(st.buf, "NPKTS", u64tmp);
+          hputu8(st->buf, "NPKTS", u64tmp);
 
           // Get DESTIP to see if we should go to IDLE state
-          hgets(st.buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
+          hgets(st->buf,  "DESTIP", sizeof(dest_ip_str), dest_ip_str);
         }
-        hashpipe_status_unlock_safe(&st);
+        hashpipe_status_unlock_safe(st);
 
         // If DESTIP is invalid or zero, go to IDLE state.  Invalid here just
         // means that it fails to parse, not that it is incorrect or otherwise
@@ -862,12 +862,12 @@ static void * run(hashpipe_thread_args_t * args)
           state = IDLE;
           waiting = 0;
           // Update DAQSTATE and status_key
-          hashpipe_status_lock_safe(&st);
+          hashpipe_status_lock_safe(st);
           {
-            hputs(st.buf, "DAQSTATE", "IDLE");
-            hputs(st.buf, status_key, "idle");
+            hputs(st->buf, "DAQSTATE", "IDLE");
+            hputs(st->buf, status_key, "idle");
           }
-          hashpipe_status_unlock_safe(&st);
+          hashpipe_status_unlock_safe(st);
         }
       } // curtime != lasttime
       clock_gettime(CLOCK_MONOTONIC_RAW, &ts_stop_stat);
@@ -876,11 +876,11 @@ static void * run(hashpipe_thread_args_t * args)
 
       // Set status field to "waiting" if we are not getting packets
       if (!GOT_PACKET && run_threads() && state != IDLE && !waiting) {
-        hashpipe_status_lock_safe(&st);
+        hashpipe_status_lock_safe(st);
         {
-          hputs(st.buf, status_key, "waiting");
+          hputs(st->buf, status_key, "waiting");
         }
-        hashpipe_status_unlock_safe(&st);
+        hashpipe_status_unlock_safe(st);
         waiting=1;
       }
 
@@ -903,11 +903,11 @@ static void * run(hashpipe_thread_args_t * args)
 
     // Got packet(s)!  Update status if needed.
     if (waiting) {
-      hashpipe_status_lock_safe(&st);
+      hashpipe_status_lock_safe(st);
       {
-        hputs(st.buf, status_key, "receiving");
+        hputs(st->buf, status_key, "receiving");
       }
-      hashpipe_status_unlock_safe(&st);
+      hashpipe_status_unlock_safe(st);
       waiting=0;
     }
 
@@ -947,16 +947,16 @@ static void * run(hashpipe_thread_args_t * args)
       // Also read PKTSTART, DWELL to calculate start/stop seq numbers.
       if(pkt_seq_num % PKSUWL_PKTIDX_PER_BLOCK == 0
           && vdif_get_thread_id(vdifhdr) == 0) {
-        hashpipe_status_lock_safe(&st);
+        hashpipe_status_lock_safe(st);
         {
-          hputi8(st.buf, "PKTIDX", pkt_seq_num);
-          hputi8(st.buf, "PKTBLK", pkt_blk_num); // TODO do we want/need this?
-          hgetu8(st.buf, "PKTSTART", &start_seq_num);
+          hputi8(st->buf, "PKTIDX", pkt_seq_num);
+          hputi8(st->buf, "PKTBLK", pkt_blk_num); // TODO do we want/need this?
+          hgetu8(st->buf, "PKTSTART", &start_seq_num);
           start_seq_num -= start_seq_num % PKSUWL_PKTIDX_PER_BLOCK;
-          hputu8(st.buf, "PKTSTART", start_seq_num);
-          hgetr8(st.buf, "DWELL", &dwell_seconds);
-          hputr8(st.buf, "DWELL", dwell_seconds); // In case it wasn't there
-          hgetr8(st.buf, "TBIN", &tbin);
+          hputu8(st->buf, "PKTSTART", start_seq_num);
+          hgetr8(st->buf, "DWELL", &dwell_seconds);
+          hputr8(st->buf, "DWELL", dwell_seconds); // In case it wasn't there
+          hgetr8(st->buf, "TBIN", &tbin);
           // Dwell blocks is equal to:
           //
           //       dwell_seconds
@@ -968,36 +968,36 @@ static void * run(hashpipe_thread_args_t * args)
               / (tbin * PKSUWL_SAMPLES_PER_PKT * PKSUWL_PKTIDX_PER_BLOCK));
 
           stop_seq_num = start_seq_num + PKSUWL_PKTIDX_PER_BLOCK * dwell_blocks;
-          hputi8(st.buf, "PKTSTOP", stop_seq_num);
+          hputi8(st->buf, "PKTSTOP", stop_seq_num);
 
-          hgetu8(st.buf, "NDROP", &u64tmp);
+          hgetu8(st->buf, "NDROP", &u64tmp);
           u64tmp += ndrop_total; ndrop_total = 0;
-          hputu8(st.buf, "NDROP", u64tmp);
+          hputu8(st->buf, "NDROP", u64tmp);
 
 #ifndef USE_IBVERBS
           // Update PSPKTS and PSDRPS
           hashpipe_pktsock_stats(p_ps, &pspkts, &psdrps);
 
-          hgetu8(st.buf, "PSPKTS", &u64tmp);
+          hgetu8(st->buf, "PSPKTS", &u64tmp);
           u64tmp += pspkts;
-          hputu8(st.buf, "PSPKTS", u64tmp);
+          hputu8(st->buf, "PSPKTS", u64tmp);
 
-          hgetu8(st.buf, "PSDRPS", &u64tmp);
+          hgetu8(st->buf, "PSDRPS", &u64tmp);
           u64tmp += psdrps;
-          hputu8(st.buf, "PSDRPS", u64tmp);
+          hputu8(st->buf, "PSDRPS", u64tmp);
 #endif // !USE_IBVERBS
 
 // TODO
 #if 0
           // Calculate processing speed in Gbps (8*bytes/ns)
-          hputi8(st.buf, "ELPSBITS", elapsed_bytes << 3);
-          hputi8(st.buf, "ELPSNS", elapsed_ns);
-          hputr4(st.buf, "NETGBPS", 8.0*elapsed_bytes / elapsed_ns);
+          hputi8(st->buf, "ELPSBITS", elapsed_bytes << 3);
+          hputi8(st->buf, "ELPSNS", elapsed_ns);
+          hputr4(st->buf, "NETGBPS", 8.0*elapsed_bytes / elapsed_ns);
           elapsed_bytes = 0;
           elapsed_ns = 0;
 #endif
         }
-        hashpipe_status_unlock_safe(&st);
+        hashpipe_status_unlock_safe(st);
       } // End status buffer block update
 
       // Manage blocks based on pkt_blk_num
@@ -1013,11 +1013,11 @@ static void * run(hashpipe_thread_args_t * args)
         // Shift working blocks
         wblk[0] = wblk[1];
         // Check start/stop using wblk[0]'s first PKTIDX
-        state = check_start_stop(&st, wblk[0].block_num * PKSUWL_PKTIDX_PER_BLOCK);
+        state = check_start_stop(st, wblk[0].block_num * PKSUWL_PKTIDX_PER_BLOCK);
         // Increment last working block
         increment_block(&wblk[1], pkt_blk_num);
         // Wait for new databuf data block to be free
-        wait_for_block_free(&wblk[1], &st, status_key);
+        wait_for_block_free(&wblk[1], st, status_key);
       }
       // Check for PKTIDX discontinuity
       else if(pkt_blk_num < wblk[0].block_num - 1
@@ -1035,7 +1035,7 @@ static void * run(hashpipe_thread_args_t * args)
         }
 
         // Check start/stop using wblk[0]'s first PKTIDX
-        state = check_start_stop(&st, wblk[0].block_num * PKSUWL_PKTIDX_PER_BLOCK);
+        state = check_start_stop(st, wblk[0].block_num * PKSUWL_PKTIDX_PER_BLOCK);
 #if 0
 // This happens after discontinuities (e.g. on startup), so don't warn about
 // it.
