@@ -291,7 +291,7 @@ static int init(hashpipe_thread_args_t *args)
     double obsbw=187.5;
     int overlap=0;
     double tbin=0.0;
-    char obs_mode[80];
+    char obs_mode[80] = {0};
     char fifo_name[PATH_MAX];
 
     /* Create control FIFO (/tmp/hpguppi_daq_control/$inst_id) */

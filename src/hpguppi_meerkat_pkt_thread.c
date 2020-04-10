@@ -159,7 +159,7 @@ static void wait_for_block_free(hpguppi_input_databuf_t *db, int block_idx,
     hashpipe_status_t * st, const char * status_key)
 {
   int rv;
-  char pktstat[80];
+  char pktstat[80] = {0};
   char pktbuf_status[80];
   int pktbuf_full = hpguppi_input_databuf_total_status(db);
   sprintf(pktbuf_status, "%d/%d", pktbuf_full, db->header.n_block);
@@ -425,8 +425,8 @@ int debug_i=0, debug_j=0;
   uint64_t wr_id;
   uint64_t base_addr;
   // String version of destination address
-  char dest_ip_stream_str[80] = {};
-  char dest_ip_stream_str_new[80] = {};
+  char dest_ip_stream_str[80] = {0};
+  char dest_ip_stream_str_new[80] = {0};
   char * pchar;
   // Numeric form of dest_ip
   struct in_addr dest_ip;

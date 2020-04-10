@@ -229,7 +229,7 @@ static void wait_for_block_free(const struct block_info * bi,
     hashpipe_status_t * st, const char * status_key)
 {
   int rv;
-  char netstat[80];
+  char netstat[80] = {0};
   char netbuf_status[80];
   int netbuf_full = hpguppi_input_databuf_total_status(bi->db);
   sprintf(netbuf_status, "%d/%d", netbuf_full, bi->db->header.n_block);
@@ -496,8 +496,8 @@ init(hashpipe_thread_args_t *args)
   int obsnchan=1;
   int overlap=0;
   double tbin=0.0;
-  char obs_mode[80];
-  char dest_ip[80];
+  char obs_mode[80] = {0};
+  char dest_ip[80] = {0};
 
   // Validate chunk sizes in pktbuf_info.  This thread currently
   // expects/requires three chunks with sizes:

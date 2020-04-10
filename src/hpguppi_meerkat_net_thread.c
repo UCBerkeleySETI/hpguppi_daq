@@ -256,7 +256,7 @@ static void wait_for_block_free(const struct block_info * bi,
     hashpipe_status_t * st, const char * status_key)
 {
   int rv;
-  char netstat[80];
+  char netstat[80] = {0};
   char netbuf_status[80];
   int netbuf_full = hpguppi_input_databuf_total_status(bi->db);
   struct timespec ts_sleep = {0, 10 * 1000 * 1000}; // 10 ms
@@ -529,8 +529,8 @@ static int init(hashpipe_thread_args_t *args)
   int nants=1;
   int overlap=0;
   double tbin=1e-6;
-  char obs_mode[80];
-  char dest_ip[80];
+  char obs_mode[80] = {0};
+  char dest_ip[80] = {0};
   char fifo_name[PATH_MAX];
   struct net_params * net_params;
   const char * status_key = args->thread_desc->skey;
@@ -675,7 +675,7 @@ int debug_i=0, debug_j=0;
   // Misc counters, etc
   int rv;
   // String version of destination address
-  char dest_ip_str[80] = {};
+  char dest_ip_str[80] = {0};
   char * pchar;
   // Numeric form of dest_ip
   struct in_addr dest_ip;

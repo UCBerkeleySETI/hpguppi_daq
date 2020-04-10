@@ -117,7 +117,7 @@ static void wait_for_block_free(hpguppi_input_databuf_t *db, int block_idx,
     hashpipe_status_t * st, const char * status_key)
 {
   int rv;
-  char ibvstat[80];
+  char ibvstat[80] = {0};
   char ibvbuf_status[80];
   int ibvbuf_full = hpguppi_input_databuf_total_status(db);
   sprintf(ibvbuf_status, "%d/%d", ibvbuf_full, db->header.n_block);
@@ -327,7 +327,7 @@ hpguppi_ibvpkt_flow(
 void
 hpguppi_ibvpkt_wait_running(hashpipe_status_t * st)
 {
-  char ibvstat[80];
+  char ibvstat[80] = {0};
   struct timespec ts_sleep = {
     .tv_sec  = 0,
     .tv_nsec = 100*1000*1000 // 100 ms
