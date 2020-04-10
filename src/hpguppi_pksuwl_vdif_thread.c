@@ -35,6 +35,9 @@
 
 #include "hpguppi_ibverbs_pkt_thread.h"
 
+// Milliseconds between periodic status buffer updates
+#define PERIODIC_STATUS_BUFFER_UPDATE_MS (200)
+
 #define ELAPSED_NS(start,stop) \
   (((int64_t)stop.tv_sec-start.tv_sec)*1000*1000*1000+(stop.tv_nsec-start.tv_nsec))
 
@@ -712,10 +715,10 @@ run(hashpipe_thread_args_t * args)
       clock_gettime(CLOCK_MONOTONIC_RAW, &ts_stop_recv);
 
       //
-      // Check for 50 ms update time
+      // Check for periodic status buffer update interval
       //
       ns_since_last_update = ELAPSED_NS(ts_last_update, ts_stop_recv);
-      if(ns_since_last_update >= 50*1000*1000) {
+      if(ns_since_last_update >= PERIODIC_STATUS_BUFFER_UPDATE_MS*1000*1000) {
         // Save new last update time
         ts_last_update = ts_stop_recv;
 

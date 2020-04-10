@@ -89,6 +89,9 @@
 #include "hpguppi_mkfeng.h"
 #include "hpguppi_ibverbs_pkt_thread.h"
 
+// Milliseconds between periodic status buffer updates
+#define PERIODIC_STATUS_BUFFER_UPDATE_MS (200)
+
 #define DEFAULT_MAX_FLOWS (16)
 
 // A bit of a hack...
@@ -713,10 +716,10 @@ int debug_i=0, debug_j=0;
       continue;
     }
 
-    // Check for 50 ms update interval
+    // Check for periodic status buffer update interval
     clock_gettime(CLOCK_MONOTONIC_RAW, &ts_now);
     ns_elapsed = ELAPSED_NS(ts_start, ts_now);
-    if(ns_elapsed >= 50*1000*1000) {
+    if(ns_elapsed >= PERIODIC_STATUS_BUFFER_UPDATE_MS*1000*1000) {
       // Save now as the new start
       ts_start = ts_now;
 
