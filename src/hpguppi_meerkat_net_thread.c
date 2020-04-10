@@ -583,7 +583,7 @@ static int init(hashpipe_thread_args_t *args)
     hgetr8(st->buf, "CHAN_BW", &chan_bw);
     hgeti4(st->buf, "OBSNCHAN", &obsnchan);
     hgeti4(st->buf, "OVERLAP", &overlap);
-    hgets(st->buf, "OBS_MODE", 80, obs_mode);
+    hgets(st->buf, "OBS_MODE", sizeof(obs_mode), obs_mode);
 
     // Prevent div-by-zero errors (should never happen...)
     if(nants == 0) {

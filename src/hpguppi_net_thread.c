@@ -348,7 +348,7 @@ static int init(hashpipe_thread_args_t *args, const int fake)
     hgeti4(st->buf, "OBSNCHAN", &obsnchan);
     hgeti4(st->buf, "OBSSCHAN", &obsschan);
     hgeti4(st->buf, "OVERLAP", &overlap);
-    hgets(st->buf, "OBS_MODE", 80, obs_mode);
+    hgets(st->buf, "OBS_MODE", sizeof(obs_mode), obs_mode);
     // Calculate TBIN
     tbin = obsnchan / obsbw / 1e6;
     // Store bind host/port info etc in status buffer

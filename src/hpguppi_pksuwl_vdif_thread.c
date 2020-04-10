@@ -564,7 +564,7 @@ init(hashpipe_thread_args_t *args)
     hgeti4(st->buf, "NPOL", &npol);
     //hgeti4(st->buf, "OBSNCHAN", &obsnchan); // Force to 1 for UWL
     hgeti4(st->buf, "OVERLAP", &overlap);
-    hgets(st->buf, "OBS_MODE", 80, obs_mode);
+    hgets(st->buf, "OBS_MODE", sizeof(obs_mode), obs_mode);
 
     // Calculate TBIN from OBSNCHAN and OBSBW
     tbin = fabs(obsnchan / obsbw) / 1e6;

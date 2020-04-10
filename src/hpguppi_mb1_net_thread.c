@@ -334,7 +334,7 @@ static int init(hashpipe_thread_args_t *args)
     hgeti4(st->buf, "NPOL", &npol);
     hgetr8(st->buf, "OBSBW", &obsbw);
     hgeti4(st->buf, "OVERLAP", &overlap);
-    hgets(st->buf, "OBS_MODE", 80, obs_mode);
+    hgets(st->buf, "OBS_MODE", sizeof(obs_mode), obs_mode);
     // If CHPERPKT is not given, assume we get them all in 8 packets
     p_psp->chperpkt =  p_psp->obsnchan/8;
     hgeti4(st->buf, "CHPERPKT", &p_psp->chperpkt);
