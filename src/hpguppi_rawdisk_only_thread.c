@@ -112,8 +112,8 @@ static void *run(hashpipe_thread_args_t * args)
     }
 
     /* Loop */
-    int64_t packetidx=0, pktstart=0, pktstop=0;
-    int npacket=0, ndrop=0, packetsize=0, blocksize=0, len=0;
+    int64_t pktidx=0, pktstart=0, pktstop=0;
+    int blocksize=0, len=0;
     int curblock=0;
     int block_count=0, blocks_per_file=128, filenum=0;
     int got_packet_0=0, first=1;
@@ -142,16 +142,13 @@ static void *run(hashpipe_thread_args_t * args)
             hpguppi_read_subint_params(ptr, &gp, &pf);
         }
 
-        /* Parse packet size, npacket from header */
-        hgeti8(ptr, "PKTIDX", &packetidx);
+        /* Read pktidx, pktstart, pktstop from header */
+        hgeti8(ptr, "PKTIDX", &pktidx);
         hgeti8(ptr, "PKTSTART", &pktstart);
         hgeti8(ptr, "PKTSTOP", &pktstop);
-        hgeti4(ptr, "PKTSIZE", &packetsize);
-        hgeti4(ptr, "NPKT", &npacket);
-        hgeti4(ptr, "NDROP", &ndrop);
 
 	// If packet idx is NOT within start/stop range
-	if(packetidx < pktstart || pktstop <= packetidx) {
+	if(pktidx < pktstart || pktstop <= pktidx) {
 	    // If file open, close it
 	    if(fdraw != -1) {
 		// Close file
@@ -163,9 +160,9 @@ static void *run(hashpipe_thread_args_t * args)
 		block_count=0;
 
 		// Print end of recording conditions
-		hashpipe_info("hashpipe_raw_disk_thread",
-		    "recording stopped: pktstart %lu pktstop %lu pktidx %lu",
-		    pktstart, pktstop, packetidx);
+		hashpipe_info(thread_name, "recording stopped: "
+		    "pktstart %lu pktstop %lu pktidx %lu",
+		    pktstart, pktstop, pktidx);
 	    }
 	    /* Mark as free */
 	    hpguppi_input_databuf_set_free(db, curblock);
@@ -181,7 +178,7 @@ static void *run(hashpipe_thread_args_t * args)
 
         // Wait for packet 0 before starting write
 	// "packet 0" is the first packet/block of the new recording,
-	// it is not necessarily packetidx == 0.
+	// it is not necessarily pktidx == 0.
         if (got_packet_0==0 && gp.stt_valid==1) {
             got_packet_0 = 1;
             hpguppi_read_obs_params(ptr, &gp, &pf);
