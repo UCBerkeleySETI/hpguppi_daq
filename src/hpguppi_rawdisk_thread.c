@@ -194,6 +194,7 @@ static void *run(hashpipe_thread_args_t * args)
     rawspec_context * ctx = (rawspec_context *)args->user_data;
     rawspec_callback_data_t * cb_data = (rawspec_callback_data_t *)ctx->user_data;
     uint32_t rawspec_block_idx = 0;
+    uint32_t rawspec_zero_block_count = 0;
 
     /* Read in general parameters */
     struct hpguppi_params gp;
@@ -272,12 +273,15 @@ static void *run(hashpipe_thread_args_t * args)
 		rawspec_stop(ctx);
 
 		// Print end of recording conditions
-		hashpipe_info(thread_name,
-		    "recording stopped: pktstart %lu pktstop %lu pktidx %lu (%u blocks to rawspec)",
-		    pktstart, pktstop, pktidx, rawspec_block_idx);
+		hashpipe_info(thread_name, "recording stopped: "
+		    "pktstart %lu pktstop %lu pktidx %lu "
+		    "rawspec blocks: %u total %u zero",
+		    pktstart, pktstop, pktidx,
+		    rawspec_block_idx, rawspec_zero_block_count);
 
-		// Reset rawspec_block_idx, last_pktidx, and piperblk
+		// Reset rawspec related variables
 		rawspec_block_idx = 0;
+		rawspec_zero_block_count = 0;
 		last_pktidx = 0;
 		piperblk = 0;
 	    }
@@ -340,6 +344,7 @@ static void *run(hashpipe_thread_args_t * args)
 	    // Start new rawspec here, but first ensure that rawspec is stopped
 	    rawspec_stop(ctx); // no-op if already stopped
 	    rawspec_block_idx = 0;
+	    rawspec_zero_block_count = 0;
 
 	    // Update filterbank headers based on raw params and Nts etc.
 	    update_fb_hdrs_from_raw_hdr(ctx, ptr);
@@ -493,8 +498,9 @@ static void *run(hashpipe_thread_args_t * args)
 		hashpipe_info(thread_name,
 		    "rawspec block %d is zeros", rawspec_block_idx);
 		rawspec_zero_blocks_to_gpu(ctx, rawspec_block_idx, 1);
-		// Increment GPU block index
+		// Increment GPU block index and zero block counter
 		rawspec_block_idx++;
+		rawspec_zero_block_count++;
 		// If a multiple of Nb blocks have been sent, start processing
 		if(rawspec_block_idx % ctx->Nb == 0) {
 		  rawspec_start_processing(ctx, RAWSPEC_FORWARD_FFT);
