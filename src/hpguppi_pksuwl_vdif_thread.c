@@ -402,7 +402,7 @@ update_status_buffer_periodic(hashpipe_status_t *st, int nfull, int nblocks,
 //     return LISTEN
 //   endif
 static
-enum run_states 
+enum run_states
 update_status_buffer_new_block(hashpipe_status_t *st, uint64_t pkt_blk)
 {
   enum run_states retval = LISTEN;
@@ -500,7 +500,6 @@ init(hashpipe_thread_args_t *args)
   int overlap=0;
   double tbin=0.0;
   char obs_mode[80] = {0};
-  char dest_ip[80] = {0};
 
   // Validate chunk sizes in pktbuf_info.  This thread currently
   // expects/requires three chunks with sizes:
