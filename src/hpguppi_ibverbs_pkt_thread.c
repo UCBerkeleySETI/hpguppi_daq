@@ -377,6 +377,9 @@ hpguppi_ibverbs_init(struct hashpipe_ibv_context * hibv_ctx,
 
   memset(hibv_ctx, 0, sizeof(struct hashpipe_ibv_context));
 
+  // MAXFLOWS got initialized by init() if needed, but we setup the default
+  // value again just in case some (buggy) downstream thread removed it from
+  // the status buffer.
   hibv_ctx->max_flows = DEFAULT_MAX_FLOWS;
 
   hashpipe_status_lock_safe(st);
@@ -552,8 +555,8 @@ static int init(hashpipe_thread_args_t *args)
   // Get pointer to hpguppi_pktbuf_info
   struct hpguppi_pktbuf_info * pktbuf_info = hpguppi_pktbuf_info_ptr(db);
 
-  // Variabled to get/set status bnuffer fields
-  uint32_t max_flows = 0;
+  // Variables to get/set status buffer fields
+  uint32_t max_flows = DEFAULT_MAX_FLOWS;
   char ifname[80] = {0};
   char ibvpktsz[80];
   strcpy(ibvpktsz, "9216"); // 9216 == 9*1024
