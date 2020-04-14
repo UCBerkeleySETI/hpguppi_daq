@@ -12,7 +12,7 @@
 //#define _GNU_SOURCE 1
 //#include <stdio.h>
 //#include <sys/types.h>
-//#include <stdlib.h>
+#include <stdlib.h>
 #include <math.h>
 #include <unistd.h>
 #include <limits.h>
