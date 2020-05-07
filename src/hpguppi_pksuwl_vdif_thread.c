@@ -337,7 +337,9 @@ static
 void
 update_status_buffer_periodic(hashpipe_status_t *st, int nfull, int nblocks,
     uint64_t nbytes, uint64_t npkts, uint64_t ns_processed,
+#if 0
     char *dest_ip_str, size_t dest_ip_len, uint32_t *bind_port,
+#endif
     time_t *last_daq_pulse, uint64_t *ndrop)
 {
   char timestr[32] = {0};
@@ -376,8 +378,10 @@ update_status_buffer_periodic(hashpipe_status_t *st, int nfull, int nblocks,
     u64tmp += *ndrop; *ndrop = 0;
     hputu8(st->buf, "NDROP", u64tmp);
 
+#if 0
     hgets(st->buf, "DESTIP", dest_ip_len, dest_ip_str);
     hgetu4(st->buf, "BINDPORT", bind_port);
+#endif
   }
   hashpipe_status_unlock_safe(st);
 }
@@ -500,6 +504,7 @@ init(hashpipe_thread_args_t *args)
   int overlap=0;
   double tbin=0.0;
   char obs_mode[80] = {0};
+  char dest_ip[80] = {0};
 
   // Validate chunk sizes in pktbuf_info.  This thread currently
   // expects/requires three chunks with sizes:
@@ -537,14 +542,19 @@ init(hashpipe_thread_args_t *args)
     return HASHPIPE_ERR_PARAM;
   }
 
-  // Get OBSFREQ and OBSBW first since their absence is a fatal error
+  // Get DESTIP, OBSFREQ, and OBSBW first since their absence is a fatal error
   hashpipe_status_lock_safe(st);
   {
+    hgets(st->buf, "DESTIP", sizeof(dest_ip), dest_ip);
     hgetr8(st->buf, "OBSFREQ", &obsfreq);
     hgetr8(st->buf, "OBSBW", &obsbw);
   }
   hashpipe_status_unlock_safe(st);
 
+  if(dest_ip[0] == 0) {
+    hashpipe_error(thread_name, "DESTIP not found but is required");
+    return HASHPIPE_ERR_PARAM;
+  }
   if(obsfreq == 0.0) {
     hashpipe_error(thread_name, "OBSFREQ not found but is required");
     return HASHPIPE_ERR_PARAM;
@@ -691,6 +701,14 @@ run(hashpipe_thread_args_t * args)
   // Wait for ibvpkt thread to be running, then it's OK to add/remove flows.
   hpguppi_ibvpkt_wait_running(st);
 
+  // Get DESTIP ands BINDPORT
+  hashpipe_status_lock_safe(st);
+  {
+    hgets(st->buf, "DESTIP", sizeof(dest_ip_str_new), dest_ip_str_new);
+    hgetu4(st->buf, "BINDPORT", &bind_port);
+  }
+  hashpipe_status_unlock_safe(st);
+
   // Initial ts_stop_recv
   clock_gettime(CLOCK_MONOTONIC_RAW, &ts_stop_recv);
 
@@ -725,7 +743,9 @@ run(hashpipe_thread_args_t * args)
         update_status_buffer_periodic(st,
             hpguppi_input_databuf_total_status(dbout), dbout->header.n_block,
             bytes_received, pkts_received, ns_processed,
+#if 0
             dest_ip_str_new, sizeof(dest_ip_str_new), &bind_port,
+#endif
             &last_daqpulse, &ndrop_total);
 
         // If DESTIP changed
@@ -740,6 +760,7 @@ run(hashpipe_thread_args_t * args)
 
           // If dest_ip is 0 (i.e. DESTIP is 0.0.0.0)
           if(dest_ip.s_addr == 0) {
+#if 0
             // Save "0.0.0.0" as current DESTIP
             strcpy(dest_ip_str_cur, dest_ip_str_new);
 
@@ -756,6 +777,7 @@ run(hashpipe_thread_args_t * args)
             // Switch to IDLE state (and ensure waiting flag is clear)
             state = IDLE;
             waiting = 0;
+#endif
           } else {
             // dest_ip!=0, only recognize if state is IDLE
             if(state == IDLE) {
