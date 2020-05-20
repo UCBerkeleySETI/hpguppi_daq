@@ -1138,6 +1138,15 @@ fflush(stdout);
         continue;
       }
 
+      // Ignore packets for channels that are not for us.  This can happen if
+      // there are packets left over from a previous observation with different
+      // stream assignments.
+      if(feng_spead_info.feng_chan < obs_info.schan ||
+          feng_spead_info.feng_chan >=
+          obs_info.schan + obs_info.hnchan*obs_info.nstrm) {
+        continue;
+      }
+
       // Count packet and the payload bits
       packet_count++;
       pkts_processed_net++;
