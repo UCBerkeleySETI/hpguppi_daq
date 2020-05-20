@@ -714,6 +714,9 @@ int debug_i=0, debug_j=0;
   //uint64_t nextblock_seq_num=0;
   uint64_t dwell_blocks = 0;
   double dwell_seconds = 300.0;
+  double fecenter = 1284.0; // Default to center freq of MeerKAT L band
+  double obsbw = 856.0;     // Default to full MeerKAT L band bandwidth
+  double obsfreq = 1284.0;  // Default to center freq of MeerKAT L band
   double chan_bw = 1.0;
   double tbin = 1.0e-6;
 
@@ -892,14 +895,40 @@ int debug_i=0, debug_j=0;
 
         // If obs_info is valid
         if(mk_obs_info_valid(obs_info)) {
-          // Update obsnchan, pktidx_per_block, and eff_block_size
+          // Get FECENTER (used to compute CHAN_BW)
+          hgetr8(st->buf, "FECENTER", &fecenter);
+
+          // Calculate CHAN_BW
+          chan_bw = (2 * fecenter)
+                  / (3 * obs_info.fenchan);
+
+          // Calculate OBSFREQ
+          obsfreq =
+            fecenter +
+            chan_bw * (
+              obs_info.schan + (
+                (int32_t)(
+                  obs_info.hnchan * obs_info.nstrm - obs_info.fenchan - 1
+                ) / 2.0
+              )
+            );
+
+          // Update obsnchan, obsbw, pktidx_per_block, and eff_block_size
           obsnchan = mk_obsnchan(obs_info);
+          obsbw = chan_bw * obsnchan / obs_info.nants;
           pktidx_per_block = mk_pktidx_per_block(BLOCK_DATA_SIZE, obs_info);
           eff_block_size = mk_block_size(BLOCK_DATA_SIZE, obs_info);
 
+          hputr8(st->buf, "CHAN_BW", chan_bw);
+          hputr8(st->buf, "OBSFREQ", obsfreq);
           hputu4(st->buf, "OBSNCHAN", obsnchan);
+          hputr8(st->buf, "OBSBW", obsbw);
           hputu4(st->buf, "PIPERBLK", pktidx_per_block);
           hputi4(st->buf, "BLOCSIZE", eff_block_size);
+
+          hputs(st->buf, "OBSINFO", "VALID");
+        } else {
+          hputs(st->buf, "OBSINFO", "INVALID");
         }
 
         if(curtime != lasttime) {
