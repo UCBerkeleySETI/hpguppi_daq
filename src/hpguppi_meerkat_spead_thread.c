@@ -1160,7 +1160,9 @@ int debug_i=0, debug_j=0;
               fecenter +
               chan_bw * (
                 obs_info.schan + (
-                  (obs_info.hnchan * obs_info.nstrm - obs_info.fenchan - 1) / 2
+                  (int32_t)(
+                    obs_info.hnchan * obs_info.nstrm - obs_info.fenchan - 1
+                  ) / 2.0
                 )
               );
 
