@@ -110,10 +110,13 @@ void
 update_fb_hdrs_from_raw_hdr(rawspec_context *ctx, const char *p_rawhdr)
 {
   int i;
+  int nbeam;
   rawspec_raw_hdr_t raw_hdr;
   rawspec_callback_data_t * cb_data = ctx->user_data;
 
   rawspec_raw_parse_header(p_rawhdr, &raw_hdr);
+  // Default to nbeam=1 if unspecified
+  nbeam = raw_hdr.nbeam == -1 ? 1 : raw_hdr.nbeam;
   hashpipe_info(__FUNCTION__,
       "beam_id = %d/%d", raw_hdr.beam_id, raw_hdr.nbeam);
 
@@ -125,7 +128,7 @@ update_fb_hdrs_from_raw_hdr(rawspec_context *ctx, const char *p_rawhdr)
     cb_data[i].fb_hdr.src_dej = raw_hdr.dec;
     cb_data[i].fb_hdr.tstart = raw_hdr.mjd;
     cb_data[i].fb_hdr.ibeam = raw_hdr.beam_id;
-    cb_data[i].fb_hdr.nbeams = raw_hdr.nbeam;
+    cb_data[i].fb_hdr.nbeams = nbeam;
     strncpy(cb_data[i].fb_hdr.source_name, raw_hdr.src_name, 80);
     cb_data[i].fb_hdr.source_name[80] = '\0';
     // Output product dependent
