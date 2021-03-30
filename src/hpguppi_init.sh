@@ -36,6 +36,20 @@ case $cores_per_cpu in
     OUT1CPU=12
     MASK=0xfe00
     ;;
+  10)
+    # We use a dual 10-core CPU system with everything on the second socket (CPUs 10-19),
+    # with CPU 10 being reserved for NIC IRQs.  This leads to the following CPU mask:
+    #
+    # 1111 1111 1100 0000 0000
+    # 9876 5432 1098 7654 3210
+    # ---- ---- ---- ---- ----
+    # 1111 1111 1000 0000 0000 = 0xff800
+    NET0CPU=11
+    OUT0CPU=12
+    NET1CPU=13
+    OUT1CPU=14
+    MASK=0xff800
+    ;;
   *)
     echo "$cores_per_cpu cores per cpu is not yet supported by $0"
     exit 1
