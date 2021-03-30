@@ -417,7 +417,9 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
 
     /* Open command FIFO for read */
     char fifo_name[PATH_MAX];
+#ifdef USE_COMMAND_FIFO
     char fifo_cmd[MAX_CMD_LEN];
+#endif
     sprintf(fifo_name, "%s/%d", HPGUPPI_DAQ_CONTROL, args->instance_id);
     int fifo_fd = open(fifo_name, O_RDONLY | O_NONBLOCK);
     if (fifo_fd<0) {
@@ -531,7 +533,12 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
     int netbuf_full = 0;
     char netbuf_status[128] = {};
     unsigned force_new_block=0, waiting=-1;
-    enum run_states state = IDLE;
+    enum run_states state =
+#ifdef USE_COMMAND_FIFO
+        IDLE;
+#else
+        ARMED;
+#endif
 
     // Heartbeat variables
     time_t lasttime = 0;
@@ -627,6 +634,7 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                 waiting=1;
             }
 
+#ifdef USE_COMMAND_FIFO
             // Check FIFO for command
             rv = read(fifo_fd, fifo_cmd, MAX_CMD_LEN-1);
             if(rv == -1 && errno != EAGAIN) {
@@ -669,6 +677,7 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
                             "got unrecognized command '%s'", fifo_cmd);
                 }
             }
+#endif
 
         } while (!p_frame && run_threads());
 
