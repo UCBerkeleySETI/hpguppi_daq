@@ -480,6 +480,8 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
         }
     }
     unsigned packets_per_block = block_size / packet_data_size;
+    hashpipe_info("hpguppi_net_thread", "packet_data_size = %lu", packet_data_size);
+    hashpipe_info("hpguppi_net_thread", "packets_per_block = %lu", packets_per_block);
 
     const uint64_t samples_per_second = 3UL*1000*1000*1000; // 3 GHz
     const uint64_t samples_per_spectrum = 1024;
@@ -690,6 +692,7 @@ static void *run(hashpipe_thread_args_t * args, const int fake)
         /* Check packet size */
         if(p_ps_params->packet_size == 0) {
             p_ps_params->packet_size = PKT_UDP_SIZE(p_frame) - 8;
+            hashpipe_info("hpguppi_net_thread", "auto-detected packet_size = %lu", p_ps_params->packet_size);
         } else if(p_ps_params->packet_size != PKT_UDP_SIZE(p_frame) - 8) {
             /* Unexpected packet size, ignore? */
             nbogus_total++;
