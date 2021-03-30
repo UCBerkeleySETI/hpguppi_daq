@@ -147,6 +147,10 @@ elif [ "$1" = 'fake' ]
 then
   net_thread=hpguppi_fake_net_thread
   shift
+elif [ "$1" = 'srt' ]
+then
+  use_fifo=no
+  shift
 elif [ "$1" = 'mb1' ]
 then
   redis_sync_key=s6_mcount_0
