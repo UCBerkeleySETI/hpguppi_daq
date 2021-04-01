@@ -150,6 +150,11 @@ then
 elif [ "$1" = 'srt' ]
 then
   use_fifo=no
+  hpguppi_plugin=/home/davidm/local/src/hpguppi_daq/src/.libs/hpguppi_daq.so
+  net_thread="hpguppi_ibvpkt_thread -c 11 hpguppi_pkt_thread"
+  out_thread=null_output_thread
+  # 42 for ether+ip+udp, 8 for app header, 8192+24 app payload and extra 24
+  options="-o IBVPKTSZ=42,8,8216"
   shift
 elif [ "$1" = 'mb1' ]
 then
