@@ -452,7 +452,7 @@ update_status_buffer_new_block(hashpipe_status_t *st, struct block_info *bi)
         } else {
           get_current_mjd(&stt_imjd, &stt_smjd, &stt_offs);
         }
-          
+
         hputu4(st->buf, "STTVALID", 1);
         hputu4(st->buf, "STT_IMJD", stt_imjd);
         hputu4(st->buf, "STT_SMJD", stt_smjd);
@@ -946,9 +946,9 @@ run(hashpipe_thread_args_t * args)
       if(0 <= wblk_idx && wblk_idx < 2) {
         // Copy packet data to data buffer of working block
         p_dest = (uint8_t *)block_info_data(wblk+wblk_idx) +
-          (pkt_seq_num % piperblk) * ntperpkt;
+          (pkt_seq_num % piperblk) * ntperpkt * 4;
         hpguppi_data_copy_transpose_avx((char *)p_dest, (char *)payload_data,
-            obsnchan, ntperpkt, ntperblk); 
+            obsnchan, ntperpkt, ntperblk);
 
         // Count packet for block
         wblk[wblk_idx].npacket++;
