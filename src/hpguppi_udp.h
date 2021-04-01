@@ -8,6 +8,36 @@
 #include <sys/types.h>
 #include <netdb.h>
 #include <poll.h>
+#include <netinet/if_ether.h>
+#include <netinet/ip.h>
+#include <netinet/udp.h>
+
+// DIBAS/VEGAS CODD-mode format UDP packet payload consists of 8 bytes header +
+// 8192 bytes data + 24 bytes footer.
+//
+// Packet offset to payload header
+#define PKT_OFFSET_GUPPI_PAYLOAD_HEADER \
+  (sizeof(struct ethhdr) + \
+   sizeof(struct iphdr ) + \
+   sizeof(struct udphdr))
+
+// Size of payload header
+#define PKT_SIZE_GUPPI_PAYLOAD_HEADER (8)
+
+// Packet offset to the payload data
+#define PKT_OFFSET_GUPPI_PAYLOAD_DATA \
+  (PKT_OFFSET_GUPPI_PAYLOAD_HEADER + PKT_SIZE_GUPPI_PAYLOAD_HEADER)
+
+// Size of payload data
+#define PKT_SIZE_GUPPI_PAYLOAD_DATA (8192)
+
+// Packet offset to the payload data
+#define PKT_OFFSET_GUPPI_PAYLOAD_FOOTER \
+  (PKT_OFFSET_GUPPI_PAYLOAD_DATA + PKT_SIZE_GUPPI_PAYLOAD_DATA)
+
+// Payload footer is 8 bytes "frame check sequence" (unused) + two 8 byte
+// "Inter-Frame Gaps" (not sure why those were added).
+#define PKT_SIZE_GUPPI_PAYLOAD_FOOTER (8+8+8)
 
 #define GUPPI_MAX_PACKET_SIZE 9000
 
