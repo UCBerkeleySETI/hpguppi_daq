@@ -75,6 +75,12 @@ void parkes_to_guppi_from_payload(char *payload, const int acc_len,
 void hpguppi_udp_packet_data_copy(char *out, const struct hpguppi_udp_packet *p);
 void hpguppi_udp_packet_data_copy_from_payload(char *out, const char *payload, size_t payload_size);
 
+/* Generic(ish) transpose copy function */
+void hpguppi_data_copy_transpose(char *out, const char* in,
+    const unsigned chan_per_packet,
+    const unsigned samp_per_packet,
+    const unsigned samp_per_block);
+
 /* Copy and corner turn for baseband multichannel modes */
 void hpguppi_udp_packet_data_copy_transpose(char *databuf, int nchan,
         unsigned block_pkt_idx, unsigned packets_per_block,

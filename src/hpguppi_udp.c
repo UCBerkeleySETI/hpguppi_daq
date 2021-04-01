@@ -241,6 +241,51 @@ void hpguppi_udp_packet_data_copy_transpose(char *databuf, int nchan,
             p->data, p->packet_size);
 }
 
+// - `out` should point to first destination location for packet (i.e. time
+//   dependent offset into first channel).
+// - `in` should point to first byte of payload data
+// - `chan_per_packet` is number of channels per packet
+// - `samp_per_packet` is number of time (spectra) samples per packet
+// - `samp_per_block` is number of time (spectra) samples per block
+void hpguppi_data_copy_transpose(char *out, const char* in,
+    const unsigned chan_per_packet,
+    const unsigned samp_per_packet,
+    const unsigned samp_per_block)
+{
+    const size_t bytes_per_sample = 4;
+    const char *iptr;
+    unsigned isamp, ichan;
+
+    // Arrange data from network packet format e.g:
+    // S0C0P0123, S0C1P0123, S0C2P0123, ... S0CnP0123 <== Time (spectra) 0
+    // S1C0P0123, S1C1P0123, S1C2P0123, ... S1CnP0123 <== Time (spectra) 1
+    // S2C0P0123, S2C1P0123, S3C2P0123, ... S2CnP0123 <== Time (spectra) 2
+    // S3C0P0123, S3C1P0123, S3C2P0123, ... S3CnP0123 <== Time (spectra) 3
+    // ...
+    // SmC0P0123, SmC1P0123, SmC2P0123, ... SmCnP0123 <== Time (spectra) m
+
+    // Into the format:
+    // S0C0P0123, S1C0P0123, S2C0P0123, ... SmC0P0123 <== Chan 0
+    // S0C1P0123, S1C1P0123, S2C1P0123, ... SmC1P0123 <== Chan 1
+    // S0C2P0123, S1C2P0123, S2C2P0123, ... SmC2P0123 <== Chan 2
+    // S0C3P0123, S1C3P0123, S2C3P0123, ... SmC3P0123 <== Chan 3
+    // ...
+    // S0CnP0123, S1CnP0123, S2CnP0123, ... SmCnP0123 <== Chan n
+
+    /* New improved more cache friendly version on CPU */
+    for (ichan=0; ichan<chan_per_packet; ++ichan)
+    {
+        iptr = in + (ichan*bytes_per_sample);
+        for (isamp=0; isamp<samp_per_packet; ++isamp)
+        {
+            memcpy(out, iptr, bytes_per_sample);
+            out += bytes_per_sample;
+            iptr += chan_per_packet*bytes_per_sample;
+        }
+        out += bytes_per_sample*(samp_per_block-samp_per_packet);
+    }
+}
+
 void hpguppi_udp_packet_data_copy_transpose_from_payload(char *databuf, int nchan,
         unsigned block_pkt_idx, unsigned packets_per_block,
         const char *payload, size_t payload_size)
