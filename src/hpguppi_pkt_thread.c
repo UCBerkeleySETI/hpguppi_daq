@@ -725,6 +725,11 @@ run(hashpipe_thread_args_t * args)
 #endif
             &last_daqpulse, &ndrop_total);
 
+        // Reset performance counters
+        bytes_received = 0;
+        pkts_received  = 0;
+        ns_processed   = 0;
+
         // If DESTIP changed
         if(strcmp(dest_ip_str_cur, dest_ip_str_new)) {
           // Parse new DESTIP
