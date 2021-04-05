@@ -111,6 +111,23 @@ void hpguppi_data_copy_transpose(char *out, const char* in,
     const unsigned samp_per_packet,
     const unsigned samp_per_block);
 
+/* AVX-optimized version of generic(ish) transpose copy function */
+void hpguppi_data_copy_transpose_avx(char *out, const char* in,
+    const unsigned chan_per_packet,
+    const unsigned samp_per_packet,
+    const unsigned samp_per_block);
+
+#if 0
+// Inefficient!
+#if HAVE_AVX512F_INSTRUCTIONS
+/* AVX512 version of generic(ish) transpose copy function */
+void hpguppi_data_copy_transpose_avx512(char *out, const char* in,
+    const unsigned chan_per_packet,
+    const unsigned samp_per_packet,
+    const unsigned samp_per_block);
+#endif // HAVE_AVX512F_INSTRUCTIONS
+#endif // 0 (inefficient)
+
 /* Copy and corner turn for baseband multichannel modes */
 void hpguppi_udp_packet_data_copy_transpose(char *databuf, int nchan,
         unsigned block_pkt_idx, unsigned packets_per_block,

@@ -24,7 +24,9 @@ hpguppi_support = hpguppi_ibverbs_pkt_thread.h \
 		  hpguppi_udp.c    \
 		  hpguppi_vdif.h   \
 		  polyco_struct.h  \
-		  psrfits.h
+		  psrfits.h        \
+		  transpose.h      \
+		  transpose.c
 
 libsla_support = slalib.h sla.c f77.h
 
@@ -56,8 +58,13 @@ dist_bin_SCRIPTS = hpguppi_gbtstatus_loop.rb \
 		   kill_hpguppi.sh           \
 		   start_hpguppi.sh
 
-check_PROGRAMS = test_vdifhdr
+check_PROGRAMS = test_vdifhdr \
+		 test_transpose
 
 test_vdifhdr_SOURCES = test_vdifhdr.c hpguppi_pksuwl.h hpguppi_vdif.h
+
+test_transpose_SOURCES = test_transpose.c
+test_transpose_LDADD = hpguppi_udp.o transpose.o -lhashpipestatus
+test_transpose_LDFLAGS = -L"@HASHPIPE_LIBDIR@" -Wl,-rpath,"@HASHPIPE_LIBDIR@"
 
 # vi: set ts=8 noet :

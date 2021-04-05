@@ -13,13 +13,13 @@
 #include <fcntl.h>
 #include <poll.h>
 
+#include <immintrin.h>
+
 #include <hashpipe.h>
 
 #include "hpguppi_databuf.h"
 #include "hpguppi_udp.h"
-//#ifdef USE_SSE_TRANSPOSE
-//#include "sse_transpose.h"
-//#endif
+#include "transpose.h"
 
 
 int hpguppi_udp_init(struct hpguppi_udp_params *p) {
@@ -285,6 +285,160 @@ void hpguppi_data_copy_transpose(char *out, const char* in,
         out += bytes_per_sample*(samp_per_block-samp_per_packet);
     }
 }
+
+// - `out` should point to first destination location for packet (i.e. time
+//   dependent offset into first channel).
+// - `in` should point to first byte of payload data
+// - `chan_per_packet` is number of channels per packet
+// - `samp_per_packet` is number of time (spectra) samples per packet
+// - `samp_per_block` is number of time (spectra) samples per block
+void hpguppi_data_copy_transpose_avx(char *out, const char* in,
+    const unsigned chan_per_packet,
+    const unsigned samp_per_packet,
+    const unsigned samp_per_block)
+{
+    // Arrange data from network packet format e.g:
+    //
+    //     S0C0P0123, S0C1P0123, ..., S0CnP0123 <== Time (spectra) 0
+    //     S1C0P0123, S1C1P0123, ..., S1CnP0123 <== Time (spectra) 1
+    //     ...
+    //     SmC0P0123, SmC1P0123, ..., SmCnP0123 <== Time (spectra) m
+    //
+    // Into the format:
+    //
+    //     S0C0P0123, S1C0P0123, ..., SmC0P0123 <== Chan 0
+    //     S0C1P0123, S1C1P0123, ..., SmC1P0123 <== Chan 1
+    //     ...
+    //     S0CnP0123, S1CnP0123, ..., SmCnP0123 <== Chan n
+    //
+    // Use _mm256_i32gather_epi32 instrinsic to load 8 x 32 bit values from
+    // strided locations in source `pin`, then use _mm256_stream_si256
+    // instrinsic to store 8 x 32 bit values in destrination `pout`.  The first
+    // load will get values:
+    //
+    //     S0C0P0123 <== Time (spectra) 0
+    //     S1C0P0123 <== Time (spectra) 1
+    //     ...
+    //     S7C0P0123 <== Time (spectra) 3
+    //
+    // These values will be stored as:
+    //
+    //     S0C0P0123m S1C0P0123, ..., S7C0P0123
+
+    int c, t;
+    float *pfsrc;
+    float *pfdst;
+
+    // Outer loop steps by 8 frequency channels
+    // Inner loop steps by 8 time samples
+    // Nesting the loops this way was found to be much faster than the other
+    // way around (at least on "Intel(R) Xeon(R) CPU E5-2620 v3 @ 2.40GHz").
+    for(c=0; c<chan_per_packet; c+=8) {
+        for(t=0; t<samp_per_packet; t+=8) {
+            pfsrc = ((float *)in) + t*chan_per_packet + c;
+            pfdst = ((float *)out) + c*samp_per_block + t;
+            transpose_8x8_f32(pfdst, pfsrc, chan_per_packet, samp_per_block);
+        }
+    }
+}
+
+#if 0
+// WARNING!!! This is not efficient.  AVX512 optimized copy-with-transpose
+// WARNING!!! should use a transpose_16x16 function analogous to the
+// WARNING!!! transpose_8x8_f32 function used in the AVX version.
+
+#if HAVE_AVX512F_INSTRUCTIONS
+// - `out` should point to first destination location for packet (i.e. time
+//   dependent offset into first channel).
+// - `in` should point to first byte of payload data
+// - `chan_per_packet` is number of channels per packet
+// - `samp_per_packet` is number of time (spectra) samples per packet
+// - `samp_per_block` is number of time (spectra) samples per block
+void hpguppi_data_copy_transpose_avx512(char *out, const char* in,
+    const unsigned chan_per_packet,
+    const unsigned samp_per_packet,
+    const unsigned samp_per_block)
+{
+    // Arrange data from network packet format e.g:
+    //
+    //     S0C0P0123, S0C1P0123, ..., S0CnP0123 <== Time (spectra) 0
+    //     S1C0P0123, S1C1P0123, ..., S1CnP0123 <== Time (spectra) 1
+    //     ...
+    //     SmC0P0123, SmC1P0123, ..., SmCnP0123 <== Time (spectra) m
+    //
+    // Into the format:
+    //
+    //     S0C0P0123, S1C0P0123, ..., SmC0P0123 <== Chan 0
+    //     S0C1P0123, S1C1P0123, ..., SmC1P0123 <== Chan 1
+    //     ...
+    //     S0CnP0123, S1CnP0123, ..., SmCnP0123 <== Chan n
+    //
+    // Use _mm512_i32gather_epi32 instrinsic to load 16 x 32 bit values from
+    // strided locations in source `pin`, then use _mm512_stream_si512
+    // instrinsic to store 16 x 32 bit values in destrination `pout`.  The first
+    // load will get values:
+    //
+    //     S0C0P0123 <== Time (spectra) 0
+    //     S1C0P0123 <== Time (spectra) 1
+    //     ...
+    //     S15C0P0123 <== Time (spectra) 3
+    //
+    // These values will be stored as:
+    //
+    //     S0C0P0123m S1C0P0123, ..., S15C0P0123
+    //
+    // Outer loop steps through input by 16 time samples, inner loop steps
+    // through input by 1 frequency channel.
+
+    const int * pin = (const int *)in;
+    __m512i * pout = (__m512i *)out;
+
+
+    __m512i data;
+    __m512i vindex = _mm512_set_epi32(
+        15 * chan_per_packet,
+        14 * chan_per_packet,
+        13 * chan_per_packet,
+        12 * chan_per_packet,
+        11 * chan_per_packet,
+        10 * chan_per_packet,
+        9 * chan_per_packet,
+        8 * chan_per_packet,
+        7 * chan_per_packet,
+        6 * chan_per_packet,
+        5 * chan_per_packet,
+        4 * chan_per_packet,
+        3 * chan_per_packet,
+        2 * chan_per_packet,
+        1 * chan_per_packet,
+        0 * chan_per_packet
+    );
+    const int scale = 4;
+
+    unsigned isamp, ichan;
+
+    /* New improved more cache friendly version on CPU */
+    for (isamp=0; isamp<samp_per_packet/16; ++isamp)
+    {
+        // Init pout for this set of 16 time samples
+        pout = (__m512i *)(((int *)out) + 16 * isamp);
+
+        for (ichan=0; ichan<chan_per_packet; ++ichan)
+        {
+            // Load
+            data = _mm512_i32gather_epi32(vindex, pin++, scale);
+            // Store
+            _mm512_stream_si512(pout, data);
+            // Increment pout by samp_per_block/16
+            pout += samp_per_block/16;
+        }
+
+        // Skip over next 15 time samples in input
+        pin += 15 * chan_per_packet;
+    }
+}
+#endif // HAVE_AVX512F_INSTRUCTIONS
+#endif // 0 (inefficient)
 
 void hpguppi_udp_packet_data_copy_transpose_from_payload(char *databuf, int nchan,
         unsigned block_pkt_idx, unsigned packets_per_block,

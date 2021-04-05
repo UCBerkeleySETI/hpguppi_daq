@@ -28,4 +28,5 @@ ltmain.sh
 missing
 stamp-h1
 # Other build products
+test_transpose
 test_vdifhdr

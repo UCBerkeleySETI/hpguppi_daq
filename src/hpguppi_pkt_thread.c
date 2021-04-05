@@ -919,7 +919,7 @@ run(hashpipe_thread_args_t * args)
         // Copy packet data to data buffer of working block
         p_dest = (uint8_t *)block_info_data(wblk+wblk_idx) +
           (pkt_seq_num % piperblk) * ntperpkt;
-        hpguppi_data_copy_transpose((char *)p_dest, (char *)payload_data,
+        hpguppi_data_copy_transpose_avx((char *)p_dest, (char *)payload_data,
             obsnchan, ntperpkt, ntperblk); 
 
         // Count packet for block
