@@ -151,16 +151,24 @@ static void finalize_block(struct block_info *bi)
   uint64_t pktstart = 0;
   uint64_t pktstop = 0;
   uint32_t sttvalid = 0;
+  double tbin = 1/128e6;
+  int obsnchan=64;
+  uint64_t ntperpkt;
 
-  //struct timeval tv;
+  struct timeval tv = {0, 0};
+  double pktsec;
+  double pktsec_int;
+  double pktsec_frac;
 
-  //int    stt_imjd = 0;
-  //int    stt_smjd = 0;
-  //double stt_offs = 0;
+  int    stt_imjd = 0;
+  int    stt_smjd = 0;
+  double stt_offs = 0;
 
   hgetu8(header, "PKTSTART", &pktstart);
   hgetu8(header, "PKTSTOP", &pktstop);
   hgetu4(header, "STTVALID", &sttvalid);
+  hgeti4(header, "OBSNCHAN", &obsnchan);
+  hgetr8(header, "TBIN", &tbin);
 
   // Ensure STTVALID in block header is consistent with pktidx/pktstart/pktstop
   // The block's header is a copy of the status buffer when the block was
@@ -169,7 +177,27 @@ static void finalize_block(struct block_info *bi)
   // two blocks of a recording get STTVALID=1.
   if(pktstart <= pktidx && pktidx < pktstop) {
     if(sttvalid != 1) {
+      // If we have synctime, we can compute time from PKTSTART, otherwise
+      // use current time.
+      hgeti8(header, "SYNCTIME", &tv.tv_sec);
+      if(tv.tv_sec != 0) {
+        // Calc IMJD/SMJD/OFFS based on PKTSTART.  This isn't perfect because
+        // it assumes recording started at PKTSTART.  It's possible that the
+        // first block recorded happened after PKTSTART.
+        ntperpkt = PKT_SIZE_GUPPI_PAYLOAD_DATA / 4 / obsnchan;
+        pktsec = pktstart * ntperpkt * tbin;
+        pktsec_frac = modf(pktsec, &pktsec_int);
+        tv.tv_sec += (time_t)pktsec_int;
+        tv.tv_usec = trunc(1e6 * pktsec_frac);
+        get_mjd_from_timeval(&tv, &stt_imjd, &stt_smjd, &stt_offs);
+      } else {
+        get_current_mjd(&stt_imjd, &stt_smjd, &stt_offs);
+      }
+
       hputu4(header, "STTVALID", 1);
+      hputu4(header, "STT_IMJD", stt_imjd);
+      hputu4(header, "STT_SMJD", stt_smjd);
+      hputr8(header, "STT_OFFS", stt_offs);
     }
   } else {
     if(sttvalid != 0) {
