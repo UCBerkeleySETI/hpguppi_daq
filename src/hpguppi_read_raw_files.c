@@ -1,3 +1,11 @@
+/* hpguppi_read_raw_files.c
+ *
+ * Routine to read GUPPI RAW files and put them 
+ * into shared memory blocks. 
+ * Can specify output dir if want it different 
+ * from input.
+ * Author: Cherry Ng
+ */
 #define MAX_HDR_SIZE (256000)
 #define BLOC_PER_FILE (128)
 
@@ -19,15 +27,20 @@
 
 int get_header_size(int fdin, char * header_buf, size_t len)
 {
-  read(fdin, header_buf, MAX_HDR_SIZE);
-  int i;
-  //Read header loop over the 80-byte records
-  for (i=0; i<len; i += 80) {
-    // If we found the "END " record
-    if(!strncmp(header_buf+i, "END ", 4)) {
-      // Move to just after END record
-      i += 80;
-      break;
+  int rv;
+  int i=0;
+  rv = read(fdin, header_buf, MAX_HDR_SIZE);
+  if (rv == -1) {
+    hashpipe_error("hpguppi_read_raw_files", "error reading file");
+  } else if (rv > 0) {
+    //Read header loop over the 80-byte records
+    for (i=0; i<len; i += 80) {
+      // If we found the "END " record
+      if(!strncmp(header_buf+i, "END ", 4)) {
+	// Move to just after END record
+	i += 80;
+	break;
+      }
     }
   }
   return i;
@@ -94,7 +107,6 @@ static void *run(hashpipe_thread_args_t * args)
     int block_idx = 0;
     int block_count=0, filenum=0;
     int blocsize;
-    size_t pos;
     char *ptr;
 
     //Filenames and paths
@@ -102,7 +114,6 @@ static void *run(hashpipe_thread_args_t * args)
     char fname[256];
     hgets(st.buf, "BASEFILE", sizeof(basefilename), basefilename);
     char outdir[256];
-    sprintf(outdir, "%s", basefilename); //Use the input dir as the default
     hgets(st.buf, "OUTDIR", sizeof(outdir), outdir);
     /* Init output file descriptor (-1 means no file open) */
     static int fdin = -1;
@@ -164,9 +175,9 @@ static void *run(hashpipe_thread_args_t * args)
 
 	//Read data--------------------------------------------------
 	ptr = hpguppi_databuf_data(db, block_idx);
-	pos = lseek(fdin, headersize-MAX_HDR_SIZE, SEEK_CUR);
+	lseek(fdin, headersize-MAX_HDR_SIZE, SEEK_CUR);
 	blocsize = get_block_size(header_buf, MAX_HDR_SIZE);
-	size_t bytes_read = read_fully(fdin, ptr, blocsize);
+	read_fully(fdin, ptr, blocsize);
 
 	// Mark block as full
 	hpguppi_input_databuf_set_filled(db, block_idx);
