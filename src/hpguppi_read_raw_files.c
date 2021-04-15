@@ -102,6 +102,7 @@ static void *run(hashpipe_thread_args_t * args)
     char fname[256];
     hgets(st.buf, "BASEFILE", sizeof(basefilename), basefilename);
     char outdir[256];
+    sprintf(outdir, "%s", basefilename); //Use the input dir as the default
     hgets(st.buf, "OUTDIR", sizeof(outdir), outdir);
     /* Init output file descriptor (-1 means no file open) */
     static int fdin = -1;
