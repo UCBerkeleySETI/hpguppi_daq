@@ -48,7 +48,7 @@ else
 fi
 
 #-------------------------------------------
-echo "Run Command:" hashpipe -p ${hpguppi_plugin:-hpguppi_daq} ../src/$net_thread ../src/$out_thread \
+echo "Run Command:" hashpipe -p ${hpguppi_plugin:-hpguppi_daq} $net_thread $out_thread \
  -o BASEFILE=${basefile} \
  -o OUTDIR=${outdir}
 	 
