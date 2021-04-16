@@ -213,8 +213,8 @@ static void *run(hashpipe_thread_args_t * args)
 
 }
 
-static hashpipe_thread_desc_t read_raw_file = {
-    name: "read_raw_file",
+static hashpipe_thread_desc_t hpguppi_read_raw_files = {
+    name: "hpguppi_read_raw_files",
     skey: "NETSTAT",
     init: NULL,
     run:  run,
@@ -224,5 +224,5 @@ static hashpipe_thread_desc_t read_raw_file = {
 
 static __attribute__((constructor)) void ctor()
 {
-  register_hashpipe_thread(&read_raw_file);
+  register_hashpipe_thread(&hpguppi_read_raw_files);
 }
