@@ -238,6 +238,10 @@ void hpguppi_read_obs_params(char *buf,
 {
     char base[200], dir[200], banknam[64];
 
+    // For date and time of start
+    int YYYY, MM, DD, h, m;
+    double s;
+
     // Software data-stream modification params
     get_int("DS_TIME", p->hdr.ds_time_fact, 1); // Time down-sampling
     get_int("DS_FREQ", p->hdr.ds_freq_fact, 1); // Freq down-sampling
@@ -340,23 +344,27 @@ void hpguppi_read_obs_params(char *buf,
                 p->hdr.start_day, (int)(p->hdr.start_sec), g->start_pkt/16384,
                 p->hdr.source, p->hdr.scan_number);
     }
+    // Date and time of start
+    datetime_from_mjd(p->hdr.MJD_epoch, &YYYY, &MM, &DD, &h, &m, &s);
+    sprintf(p->hdr.date_obs, "%04d-%02d-%02dT%02d:%02d:%06.3f",
+            YYYY % 10000, MM % 100, DD % 100, h % 24, m % 60, s);
+    // Base filename
 #ifdef NO_PROJECT_DIR
     sprintf(p->basefilename, "%s/%s", dir, base);
 #else
     // Use a $DATADIR/$PROJID/$BACKEND/$BANK prefix for files
     if (strnlen(banknam, sizeof(banknam)) < 1)
         snprintf(banknam, sizeof(banknam), ".");
-    sprintf(p->basefilename, "%s/%s/%s%s/%c/%s", dir, p->hdr.project_id,
-            p->hdr.backend, g->coherent ? "_CODD" : "",
-            banknam[strnlen(banknam, sizeof(banknam))-1], base);
-#endif
-    { // Date and time of start
-        int YYYY, MM, DD, h, m;
-        double s;
-        datetime_from_mjd(p->hdr.MJD_epoch, &YYYY, &MM, &DD, &h, &m, &s);
-        sprintf(p->hdr.date_obs, "%04d-%02d-%02dT%02d:%02d:%06.3f",
-                YYYY % 10000, MM % 100, DD % 100, h % 24, m % 60, s);
+    if (!strncmp(p->hdr.project_id, "Unknown", sizeof(p->hdr.project_id))) {
+        sprintf(p->basefilename, "%s/%04d%02d%02d/%s%s/%c/%s", dir, YYYY, MM, DD,
+                p->hdr.backend, g->coherent ? "_CODD" : "",
+                banknam[strnlen(banknam, sizeof(banknam))-1], base);
+    } else {
+        sprintf(p->basefilename, "%s/%s/%s%s/%c/%s", dir, p->hdr.project_id,
+                p->hdr.backend, g->coherent ? "_CODD" : "",
+                banknam[strnlen(banknam, sizeof(banknam))-1], base);
     }
+#endif
 
     // TODO: call telescope-specific settings here
     // Eventually make this depend on telescope name
