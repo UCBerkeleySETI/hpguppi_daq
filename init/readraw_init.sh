@@ -3,7 +3,7 @@
 # readraw_init.sh - Read GUPPI RAW files
 # Usage: readraw_init.sh [mode] [input] [output]
 #
-#     mode   - readonly|cp
+#     mode   - readonly|cp|fil
 #     input  - input dir
 #     output - (optional)
 #
@@ -26,14 +26,20 @@ then
 	outdir=${basefile}
 	shift
     fi
-elif [ "$1" = 'cp' ]
+elif [ "$1" = 'cp' ] || [ "$1" = 'fil' ]
 then
     net_thread=hpguppi_read_raw_files
-    out_thread=hpguppi_rawdisk_only_thread
+    if [ "$1" = 'cp' ]
+    then
+	out_thread=hpguppi_rawdisk_only_thread
+    else
+	 out_thread=hpguppi_fildisk_meerkat_thread
+    fi
+	 
     if [ -z "$2" ] || [ -z "$3" ]
     then
 	echo Input/Output dir not provided.
-	echo Usage: readraw_init.sh cp [input] [output]
+	echo Usage: readraw_init.sh [mode] [input] [output]
 	echo Exiting...
 	exit
     else
