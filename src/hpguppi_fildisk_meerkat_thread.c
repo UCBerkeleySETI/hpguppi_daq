@@ -47,7 +47,7 @@ static void *run(hashpipe_thread_args_t * args)
     }
     //Fixed paramters
     ctx->No = 1;  //No. output product
-    ctx->Np = 2; 
+    ctx->Np = 2;  //No. of pol
     ctx->Npolout[0] = 1; // total power only
     // Let rawspec manage device block buffers
     ctx->Nb = 0;
@@ -74,8 +74,8 @@ static void *run(hashpipe_thread_args_t * args)
       cb_data[i].fb_hdr.machine_id = 20;
       cb_data[i].fb_hdr.telescope_id = -1; // Unknown (updated later)
       cb_data[i].fb_hdr.data_type = 1;
-      cb_data[i].fb_hdr.nbeams =  1;
-      cb_data[i].fb_hdr.ibeam  =  1; // TODO Use actual beam ID for Parkes
+      cb_data[i].fb_hdr.nbeams =  1; 
+      cb_data[i].fb_hdr.ibeam  =  -1; //Not used 
       cb_data[i].fb_hdr.nbits  = 32;
       cb_data[i].fb_hdr.nifs   = ctx->Npolout[i];
       
@@ -85,7 +85,7 @@ static void *run(hashpipe_thread_args_t * args)
     
     ctx->user_data = cb_data;
 	    
-    /* Read in general parameters */
+    /* Read in (legacy) general parameters */
     struct hpguppi_params gp;
     struct psrfits pf;
     pf.sub.dat_freqs = NULL;
@@ -116,6 +116,7 @@ static void *run(hashpipe_thread_args_t * args)
         if (rv!=0) continue;
 
         ptr = hpguppi_databuf_header(db, curblock);
+
         /* Read pktidx, pktstart, pktstop from header */
         hgeti8(ptr, "PKTIDX", &pktidx);
         hgeti8(ptr, "PKTSTART", &pktstart);
@@ -140,8 +141,8 @@ static void *run(hashpipe_thread_args_t * args)
 	    ctx->Ntpb = calc_ntime_per_block(BLOCK_DATA_SIZE, ctx->Nc); //Time sample per blk
 
 	    //TODO: Figure out what these two should be, either hardcode it or pub/sub?
-	    ctx->Nts[0] = (1<<15); //(1<<1); //FFT size, time samples required
-	    ctx->Nas[0] = 10; //No. fine spectra to accum
+	    ctx->Nts[0] = 1; //FFT size, time samples required
+	    ctx->Nas[0] = 1; //No. fine spectra to accum
 	    printf("Ntpb %d Nts[0]=%d Nas=%d\n", ctx->Ntpb, ctx->Nts[0], ctx->Nas[0]);
 	    
 	    int Nblk = ctx->Nts[0]*ctx->Nas[0]/ctx->Ntpb;
