@@ -3,7 +3,7 @@
 # readraw_init.sh - Read GUPPI RAW files
 # Usage: readraw_init.sh [mode] [input] [output]
 #
-#     mode   - readonly|cp
+#     mode   - readonly|cp|fil
 #     input  - input dir
 #     output - (optional)
 #
