@@ -39,6 +39,7 @@ hpguppi_threads = hpguppi_ibverbs_pkt_thread.c \
 		  hpguppi_pksuwl_vdif_thread.c \
 		  hpguppi_rawdisk_thread.c \
 		  hpguppi_rawdisk_only_thread.c \
+		  hpguppi_fildisk_meerkat_thread.c \
 		  hpguppi_fildisk_only_thread.c \
 		  hpguppi_read_raw_files.c
 
