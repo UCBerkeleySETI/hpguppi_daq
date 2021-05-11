@@ -118,7 +118,7 @@ static void *run(hashpipe_thread_args_t * args)
     /* Init output file descriptor (-1 means no file open) */
     static int fdin = -1;
     char header_buf[MAX_HDR_SIZE];
-    int open_flags = O_CREAT|O_RDWR|O_SYNC;
+    int open_flags = O_RDONLY;
     int directio = 0;
 
     while (run_threads()) {
