@@ -6,5 +6,4 @@ To compile:
  $ autoreconf -is
  $ ./configure
  $ make
- $ sudo make install
  ```
