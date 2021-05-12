@@ -96,7 +96,9 @@ static void *run(hashpipe_thread_args_t * args)
 
     /* Loop */
     int64_t pktidx=0, pktstart=0, pktstop=0, pktstart_last=0, pktstop_last=0;
+    int64_t piperblk=0, last_pktidx=0;
     uint32_t rawspec_block_idx = 0;
+    uint32_t rawspec_zero_block_count = 0;
     int curblock=0;
     int first_pass=1;
     char *ptr;
@@ -166,6 +168,14 @@ static void *run(hashpipe_thread_args_t * args)
 		}
 	    }
 
+	    piperblk = hpguppi_read_piperblk(ptr);
+	    if(piperblk) {
+	      hashpipe_info(thread_name, "found PIPERBLK %lu", piperblk);
+	    }
+	    // If found, pretend the previous block was the one expected
+	    // If not found, this will set last_pktidx = pktidx
+	    last_pktidx = pktidx - piperblk;
+
             char fname[256];
             // Create the output directory if needed
             char datadir[1024];
@@ -184,6 +194,7 @@ static void *run(hashpipe_thread_args_t * args)
 	    // Start new rawspec here, but first ensure that rawspec is stopped
 	    rawspec_stop(ctx); // no-op if already stopped
 	    rawspec_block_idx = 0;
+	    rawspec_zero_block_count = 0;
 
 	    // Update filterbank headers based on raw params and Nts etc.
 	    update_fb_hdrs_from_raw_hdr(ctx, ptr);
@@ -221,6 +232,42 @@ static void *run(hashpipe_thread_args_t * args)
             hputs(st->buf, status_key, "writing");
             hashpipe_status_unlock_safe(st);
 
+
+	    // DROPPED PACKETS: If piperblk is non-zero and pktidx larger than expected
+	    if(piperblk && pktidx > last_pktidx + piperblk) {
+	      hashpipe_info(thread_name,
+			    "pktidx %lu last_pktidx %lu piperblk %lu",
+			    pktidx, last_pktidx, piperblk);
+	      hashpipe_warn(thread_name,
+			    "treating %lu missing blocks as zeros",
+			    (pktidx - last_pktidx - 1) / piperblk);
+
+	      while(pktidx > last_pktidx + piperblk) {
+		last_pktidx += piperblk;
+
+		// If first block of a GPU input buffer
+		if(rawspec_block_idx % ctx->Nb == 0) {
+		  // Wait for work to complete
+		  rawspec_wait_for_completion(ctx);
+		}
+
+		// Feed block of zeros to rawspec here
+		hashpipe_info(thread_name,
+			      "rawspec block %d is zeros", rawspec_block_idx);
+		rawspec_zero_blocks_to_gpu(ctx, rawspec_block_idx, 1);
+		// Increment GPU block index
+		rawspec_block_idx++;
+		rawspec_zero_block_count++;
+		// If a multiple of Nb blocks have been sent, start processing
+		if(rawspec_block_idx % ctx->Nb == 0) {
+		  rawspec_start_processing(ctx, RAWSPEC_FORWARD_FFT);
+		}
+	      }
+	    }
+
+	    // Update last_pktidx
+	    last_pktidx = pktidx;
+	    
 	    // If first block of a GPU input buffer
 	    if(rawspec_block_idx % ctx->Nb == 0) {
 	      // Wait for work to complete (should return immediately if we're
