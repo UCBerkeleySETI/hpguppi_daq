@@ -8,47 +8,47 @@
 #     output - (optional)
 #
 
-hpguppi_plugin=/home/cherryng/softwares/hpguppi_daq/Dev-branch/hpguppi_daq/src/.libs/hpguppi_daq.so
+hpguppi_plugin=../src/.libs/hpguppi_daq.so
 
 #Supported modes
 if [ "$1" = 'readonly' ]
 then
-    net_thread=hpguppi_read_raw_files
+    net_thread=hpguppi_rawfile_input_thread
     out_thread=null_output_thread
     if [ -z "$2" ]
     then
-	echo Input dir not provided.
-	echo Usage: readraw_init.sh readonly [input]
-	echo Exiting...
-       exit
+        echo Input dir not provided.
+        echo Usage: readraw_init.sh readonly [input]
+        echo Exiting...
+        exit
     else
-	basefile=$2
-	outdir=${basefile}
-	shift
+        basefile=$2
+        outdir=${basefile}
+        shift
     fi
 elif [ "$1" = 'cp' ] || [ "$1" = 'fil' ]
 then
-    net_thread=hpguppi_read_raw_files
+    net_thread=hpguppi_rawfile_input_thread
     if [ "$1" = 'cp' ]
     then
-	out_thread=hpguppi_rawdisk_only_thread
+        out_thread=hpguppi_rawdisk_only_thread
     else
-	 out_thread=hpguppi_fildisk_meerkat_thread
+        out_thread=hpguppi_fildisk_meerkat_thread
     fi
-	 
+
     if [ -z "$2" ] || [ -z "$3" ]
     then
-	echo Input/Output dir not provided.
-	echo Usage: readraw_init.sh [mode] [input] [output]
-	echo Exiting...
-	exit
+        echo Input/Output dir not provided.
+        echo Usage: readraw_init.sh [mode] [input] [output]
+        echo Exiting...
+        exit
     else
-	basefile=$2
-	outdir=$3
-	shift
+        basefile=$2
+        outdir=$3
+        shift
     fi
 else
-    echo Supported mode. Choose between \"readonly\" and \"cp\".
+    echo 'Unsupported mode. Choose between "readonly", "cp", "fil".'
     echo Exiting...
     exit
 fi
@@ -57,9 +57,9 @@ fi
 echo "Run Command:" hashpipe -p ${hpguppi_plugin:-hpguppi_daq} $net_thread $out_thread \
  -o BASEFILE=${basefile} \
  -o OUTDIR=${outdir}
-	 
+
 
 hashpipe -p ${hpguppi_plugin:-hpguppi_daq} $net_thread $out_thread \
  -o BASEFILE=${basefile} \
  -o OUTDIR=${outdir}
-	 
+
