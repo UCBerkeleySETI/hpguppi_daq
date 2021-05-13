@@ -55,6 +55,10 @@ static void *run(hashpipe_thread_args_t * args)
     ctx->No = 1;  //No. output product
     ctx->Np = 2;  //No. of pol
     ctx->Npolout[0] = 1; // total power only
+
+    //Always do incoherent sum for now
+    ctx->incoherently_sum = 1;
+
     // Let rawspec manage device block buffers
     ctx->Nb = 0;
     // Use databuf blocks as "caller-managed" rawspec host block buffers
@@ -158,6 +162,14 @@ static void *run(hashpipe_thread_args_t * args)
             float sizeofblk = ctx->Nc*ctx->Ntpb*ctx->Np*ctx->Nbps*2 /1024./1024./8. ; //in MB
             float Inputsize = Nblk*sizeofblk /1024.; //in GB 
             printf("No. of blk required=%d size per blk=%f MB Inputsize=%.1f GB\n", Nblk, sizeofblk, Inputsize);
+
+            //Assign weights for the incoherent sum, currently just 1s
+            hgetu4(ptr, "NANTS", &ctx->Nant);
+            ctx->Naws = ctx->Nant;
+            ctx->Aws = malloc(ctx->Naws*sizeof(float));
+            for(i=0; i < ctx->Naws; i++){
+              ctx->Aws[i] = 1.;
+            }
 
             ctx->dump_callback = rawspec_dump_callback;
 
