@@ -1,6 +1,10 @@
 /* hpguppi_fildisk_meerkat_thread.c
  *
- * Write databuf blocks out to disk.
+ * Write databuf blocks out to disk as filterbank
+ * Incoherent sum antennas with no further 
+ * channelization and spectra summing.
+ * Based on fildisk_only_thread
+ * Author: Cherry Ng
  */
 
 #define _GNU_SOURCE 1
@@ -42,9 +46,11 @@ static void *run(hashpipe_thread_args_t * args)
 
     ctx = calloc(1, sizeof(rawspec_context));
     if(!ctx) {
-      hashpipe_error(thread_name,
-	  "unable to allocate rawspec context");
+        hashpipe_error(thread_name,
+        "unable to allocate rawspec context");
     }
+
+    int i;
     //Fixed paramters
     ctx->No = 1;  //No. output product
     ctx->Np = 2;  //No. of pol
@@ -55,36 +61,36 @@ static void *run(hashpipe_thread_args_t * args)
     ctx->Nb_host = args->ibuf->n_block;
     ctx->h_blkbufs = malloc(ctx->Nb_host * sizeof(void *));
     if(!ctx->h_blkbufs) {
-      hashpipe_error(thread_name,
-		     "unable to allocate rawspec h_blkbuf array");
-      pthread_exit(NULL);
+        hashpipe_error(thread_name,
+        "unable to allocate rawspec h_blkbuf array");
+        pthread_exit(NULL);
     }
-    for(int i=0; i < ctx->Nb_host; i++) {
-      ctx->h_blkbufs[i] = (char *)&db->block[i].data;
+    for(i=0; i < ctx->Nb_host; i++) {
+        ctx->h_blkbufs[i] = (char *)&db->block[i].data;
     }
-    
+
     // Init user_data to be array of callback data structures
     cb_data = calloc(ctx->No, sizeof(rawspec_callback_data_t));
     if(!cb_data) {
-      hashpipe_error(thread_name,
-		     "unable to allocate rawspec callback data");
+        hashpipe_error(thread_name,
+        "unable to allocate rawspec callback data");
     }
     // Init pre-defined filterbank headers
-    for(int i=0; i<ctx->No; i++) {
-      cb_data[i].fb_hdr.machine_id = 20;
-      cb_data[i].fb_hdr.telescope_id = -1; // Unknown (updated later)
-      cb_data[i].fb_hdr.data_type = 1;
-      cb_data[i].fb_hdr.nbeams =  1; 
-      cb_data[i].fb_hdr.ibeam  =  -1; //Not used 
-      cb_data[i].fb_hdr.nbits  = 32;
-      cb_data[i].fb_hdr.nifs   = ctx->Npolout[i];
-      
-      // Init callback file descriptors to sentinal values
-      cb_data[i].fd = -1;
+    for(i=0; i<ctx->No; i++) {
+        cb_data[i].fb_hdr.machine_id = 20;
+        cb_data[i].fb_hdr.telescope_id = -1; // Unknown (updated later)
+        cb_data[i].fb_hdr.data_type = 1;
+        cb_data[i].fb_hdr.nbeams =  1; 
+        cb_data[i].fb_hdr.ibeam  =  -1; //Not used 
+        cb_data[i].fb_hdr.nbits  = 32;
+        cb_data[i].fb_hdr.nifs   = ctx->Npolout[i];
+
+        // Init callback file descriptors to sentinal values
+        cb_data[i].fd = -1;
     }
-    
+
     ctx->user_data = cb_data;
-	    
+
     /* Read in (legacy) general parameters */
     struct hpguppi_params gp;
     struct psrfits pf;
@@ -108,9 +114,9 @@ static void *run(hashpipe_thread_args_t * args)
 
         /* Note waiting status */
         hashpipe_status_lock_safe(st);
-	{
-	  hputs(st->buf, status_key, "waiting");
-	}
+        {
+            hputs(st->buf, status_key, "waiting");
+        }
         hashpipe_status_unlock_safe(st);
 
         /* Wait for buf to have data */
@@ -123,58 +129,58 @@ static void *run(hashpipe_thread_args_t * args)
         hgeti8(ptr, "PKTIDX", &pktidx);
         hgeti8(ptr, "PKTSTART", &pktstart);
         hgeti8(ptr, "PKTSTOP", &pktstop);
-	if (pktstart!=pktstart_last && pktstop!=pktstop_last) {
-	  hashpipe_info(thread_name, "New pointing detected with pktstart=%lu pktstop=%lu", pktstart, pktstop);
-	  first_pass = 1;
-	}
+        if (pktstart!=pktstart_last && pktstop!=pktstop_last) {
+            hashpipe_info(thread_name, "New pointing detected with pktstart=%lu pktstop=%lu", pktstart, pktstop);
+            first_pass = 1;
+        }
 
         /* Set up data ptr for quant routines */
         pf.sub.data = (unsigned char *)hpguppi_databuf_data(db, curblock);
 
         if (first_pass==1) {
-	    pktstart_last = pktstart;
-	    pktstop_last = pktstop;
-	    first_pass = 0;
+            pktstart_last = pktstart;
+            pktstop_last = pktstop;
+            first_pass = 0;
             hpguppi_read_obs_params(ptr, &gp, &pf);
 
-	    //Set up rawspec and context--------------------------------------------
-	    hgetu4(ptr, "OBSNCHAN", &ctx->Nc); //Coarse channels
-	    hgetu4(ptr, "NBITS", &ctx->Nbps); //Bit per sample
-	    ctx->Ntpb = calc_ntime_per_block(BLOCK_DATA_SIZE, ctx->Nc); //Time sample per blk
+            //Set up rawspec and context--------------------------------------------
+            hgetu4(ptr, "OBSNCHAN", &ctx->Nc); //Coarse channels
+            hgetu4(ptr, "NBITS", &ctx->Nbps); //Bit per sample
+            ctx->Ntpb = calc_ntime_per_block(BLOCK_DATA_SIZE, ctx->Nc); //Time sample per blk
 
-	    //TODO: Figure out what these two should be, either hardcode it or pub/sub?
-	    ctx->Nts[0] = 1; //FFT size, time samples required
-	    ctx->Nas[0] = 1; //No. fine spectra to accum
-	    printf("Ntpb %d Nts[0]=%d Nas=%d\n", ctx->Ntpb, ctx->Nts[0], ctx->Nas[0]);
-	    
-	    int Nblk = ctx->Nts[0]*ctx->Nas[0]/ctx->Ntpb;
-	    if (Nblk == 0) Nblk = 1; //Read at least one blk
-	    float sizeofblk = ctx->Nc*ctx->Ntpb*ctx->Np*ctx->Nbps*2 /1024./1024./8. ; //in MB
-	    float Inputsize = Nblk*sizeofblk /1024.; //in GB 
-	    printf("No. of blk required=%d size per blk=%f MB Inputsize=%.1f GB\n", Nblk, sizeofblk, Inputsize);
+            //TODO: Figure out what these two should be, either hardcode it or pub/sub?
+            ctx->Nts[0] = 1; //FFT size, time samples required
+            ctx->Nas[0] = 1; //No. fine spectra to accum
+            printf("Ntpb %d Nts[0]=%d Nas=%d\n", ctx->Ntpb, ctx->Nts[0], ctx->Nas[0]);
 
-	    ctx->dump_callback = rawspec_dump_callback;
+            int Nblk = ctx->Nts[0]*ctx->Nas[0]/ctx->Ntpb;
+            if (Nblk == 0) Nblk = 1; //Read at least one blk
+            float sizeofblk = ctx->Nc*ctx->Ntpb*ctx->Np*ctx->Nbps*2 /1024./1024./8. ; //in MB
+            float Inputsize = Nblk*sizeofblk /1024.; //in GB 
+            printf("No. of blk required=%d size per blk=%f MB Inputsize=%.1f GB\n", Nblk, sizeofblk, Inputsize);
 
-	    // Initialize rawspec
-	    if(rawspec_initialize(ctx)) {
-	      hashpipe_error(thread_name,
-			     "rawspec initialization failed !!!");
-	      pthread_exit(NULL);
-	    } else {
-	      // Copy fields from ctx to cb_data
-	      for(int i=0; i<ctx->No; i++) {
-		cb_data[i].h_pwrbuf = ctx->h_pwrbuf[i]; //Output power buffer
-		cb_data[i].h_pwrbuf_size = ctx->h_pwrbuf_size[i];
-		}
-	    }
+            ctx->dump_callback = rawspec_dump_callback;
 
-	    piperblk = hpguppi_read_piperblk(ptr);
-	    if(piperblk) {
-	      hashpipe_info(thread_name, "found PIPERBLK %lu", piperblk);
-	    }
-	    // If found, pretend the previous block was the one expected
-	    // If not found, this will set last_pktidx = pktidx
-	    last_pktidx = pktidx - piperblk;
+            // Initialize rawspec
+            if(rawspec_initialize(ctx)) {
+                hashpipe_error(thread_name,
+                    "rawspec initialization failed !!!");
+                pthread_exit(NULL);
+            } else {
+            // Copy fields from ctx to cb_data
+                for(i=0; i<ctx->No; i++) {
+                    cb_data[i].h_pwrbuf = ctx->h_pwrbuf[i]; //Output power buffer
+                    cb_data[i].h_pwrbuf_size = ctx->h_pwrbuf_size[i];
+                }
+            }
+
+            piperblk = hpguppi_read_piperblk(ptr);
+            if(piperblk) {
+                hashpipe_info(thread_name, "found PIPERBLK %lu", piperblk);
+            }
+            // If found, pretend the previous block was the one expected
+            // If not found, this will set last_pktidx = pktidx
+            last_pktidx = pktidx - piperblk;
 
             char fname[256];
             // Create the output directory if needed
@@ -184,46 +190,46 @@ static void *run(hashpipe_thread_args_t * args)
             if (last_slash!=NULL && last_slash!=datadir) {
                 *last_slash = '\0';
                 hashpipe_info(thread_name,
-		    "Using directory '%s' for output", datadir);
-		if(mkdir_p(datadir, 0755) == -1) {
-		  hashpipe_error(thread_name, "mkdir_p(%s)", datadir);
-		  pthread_exit(NULL);
-		}
+                    "Using directory '%s' for output", datadir);
+                if(mkdir_p(datadir, 0755) == -1) {
+                    hashpipe_error(thread_name, "mkdir_p(%s)", datadir);
+                    pthread_exit(NULL);
+                }
             }
 
-	    // Start new rawspec here, but first ensure that rawspec is stopped
-	    rawspec_stop(ctx); // no-op if already stopped
-	    rawspec_block_idx = 0;
-	    rawspec_zero_block_count = 0;
+            // Start new rawspec here, but first ensure that rawspec is stopped
+            rawspec_stop(ctx); // no-op if already stopped
+            rawspec_block_idx = 0;
+            rawspec_zero_block_count = 0;
 
-	    // Update filterbank headers based on raw params and Nts etc.
-	    update_fb_hdrs_from_raw_hdr(ctx, ptr);
+            // Update filterbank headers based on raw params and Nts etc.
+            update_fb_hdrs_from_raw_hdr(ctx, ptr);
 
-	    // Open filterbank files
-	    for(int i=0; i<ctx->No; i++) {
-	      sprintf(fname, "%s.%04d.fil", pf.basefilename, i);
-	      hashpipe_info(thread_name, "Opening fil file '%s'", fname);
-	      last_slash = strrchr(fname, '/');
-	      if(last_slash) {
-		strncpy(cb_data[i].fb_hdr.rawdatafile, last_slash+1, 80);
-	      } else {
-		strncpy(cb_data[i].fb_hdr.rawdatafile, fname, 80);
-	      }
-	      cb_data[i].fb_hdr.rawdatafile[80] = '\0';
+            // Open filterbank files
+            for(i=0; i<ctx->No; i++) {
+                sprintf(fname, "%s.%04d.fil", pf.basefilename, i);
+                hashpipe_info(thread_name, "Opening fil file '%s'", fname);
+                last_slash = strrchr(fname, '/');
+                if(last_slash) {
+                    strncpy(cb_data[i].fb_hdr.rawdatafile, last_slash+1, 80);
+                } else {
+                    strncpy(cb_data[i].fb_hdr.rawdatafile, fname, 80);
+                }
+                cb_data[i].fb_hdr.rawdatafile[80] = '\0';
 
-	      cb_data[i].fd = open(fname, O_CREAT|O_WRONLY|O_TRUNC|O_SYNC, 0644);
-	      if(cb_data[i].fd == -1) {
-		// If we can't open this output file, we probably won't be able to
-		// open any more output files, so print message and bail out.
-		hashpipe_error(thread_name,
-		    "cannot open filterbank output file, giving up");
-                pthread_exit(NULL);
-	      }
-	      posix_fadvise(cb_data[i].fd, 0, 0, POSIX_FADV_DONTNEED);
+                cb_data[i].fd = open(fname, O_CREAT|O_WRONLY|O_TRUNC|O_SYNC, 0644);
+                if(cb_data[i].fd == -1) {
+                    // If we can't open this output file, we probably won't be able to
+                    // open any more output files, so print message and bail out.
+                    hashpipe_error(thread_name,
+                        "cannot open filterbank output file, giving up");
+                    pthread_exit(NULL);
+                }
+                posix_fadvise(cb_data[i].fd, 0, 0, POSIX_FADV_DONTNEED);
 
-	      // Write filterbank header to output file
-	      fb_fd_write_header(cb_data[i].fd, &cb_data[i].fb_hdr);
-	    }
+                // Write filterbank header to output file
+                fb_fd_write_header(cb_data[i].fd, &cb_data[i].fb_hdr);
+            }
         }
 
         if (first_pass == 0) {
@@ -232,56 +238,55 @@ static void *run(hashpipe_thread_args_t * args)
             hputs(st->buf, status_key, "writing");
             hashpipe_status_unlock_safe(st);
 
+            // Missing blocks: If piperblk is non-zero and pktidx larger than expected
+            if(piperblk && pktidx > last_pktidx + piperblk) {
+                hashpipe_info(thread_name,
+                    "pktidx %lu last_pktidx %lu piperblk %lu",
+                    pktidx, last_pktidx, piperblk);
+                hashpipe_warn(thread_name,
+                    "treating %lu missing blocks as zeros",
+                    (pktidx - last_pktidx - 1) / piperblk);
 
-	    // DROPPED PACKETS: If piperblk is non-zero and pktidx larger than expected
-	    if(piperblk && pktidx > last_pktidx + piperblk) {
-	      hashpipe_info(thread_name,
-			    "pktidx %lu last_pktidx %lu piperblk %lu",
-			    pktidx, last_pktidx, piperblk);
-	      hashpipe_warn(thread_name,
-			    "treating %lu missing blocks as zeros",
-			    (pktidx - last_pktidx - 1) / piperblk);
+                while(pktidx > last_pktidx + piperblk) {
+                    last_pktidx += piperblk;
 
-	      while(pktidx > last_pktidx + piperblk) {
-		last_pktidx += piperblk;
+                    // If first block of a GPU input buffer
+                    if(rawspec_block_idx % ctx->Nb == 0) {
+                        // Wait for work to complete
+                        rawspec_wait_for_completion(ctx);
+                    }
 
-		// If first block of a GPU input buffer
-		if(rawspec_block_idx % ctx->Nb == 0) {
-		  // Wait for work to complete
-		  rawspec_wait_for_completion(ctx);
-		}
+                    // Feed block of zeros to rawspec here
+                    hashpipe_info(thread_name,
+                        "rawspec block %d is zeros", rawspec_block_idx);
+                    rawspec_zero_blocks_to_gpu(ctx, rawspec_block_idx, 1);
+                    // Increment GPU block index
+                    rawspec_block_idx++;
+                    rawspec_zero_block_count++;
+                    // If a multiple of Nb blocks have been sent, start processing
+                    if(rawspec_block_idx % ctx->Nb == 0) {
+                        rawspec_start_processing(ctx, RAWSPEC_FORWARD_FFT);
+                    }
+                }
+            }
 
-		// Feed block of zeros to rawspec here
-		hashpipe_info(thread_name,
-			      "rawspec block %d is zeros", rawspec_block_idx);
-		rawspec_zero_blocks_to_gpu(ctx, rawspec_block_idx, 1);
-		// Increment GPU block index
-		rawspec_block_idx++;
-		rawspec_zero_block_count++;
-		// If a multiple of Nb blocks have been sent, start processing
-		if(rawspec_block_idx % ctx->Nb == 0) {
-		  rawspec_start_processing(ctx, RAWSPEC_FORWARD_FFT);
-		}
-	      }
-	    }
+            // Update last_pktidx
+            last_pktidx = pktidx;
 
-	    // Update last_pktidx
-	    last_pktidx = pktidx;
-	    
-	    // If first block of a GPU input buffer
-	    if(rawspec_block_idx % ctx->Nb == 0) {
-	      // Wait for work to complete (should return immediately if we're
-	      // keeping up)
-	      rawspec_wait_for_completion(ctx);
-	    }
-	    // Feed block to rawspec here
-	    rawspec_copy_blocks_to_gpu(ctx, curblock, rawspec_block_idx, 1);
-	    // Increment GPU block index
-	    rawspec_block_idx++;
-	    // If a multiple of Nb blocks have been sent, start processing
-	    if(rawspec_block_idx % ctx->Nb == 0) {
-	      rawspec_start_processing(ctx, RAWSPEC_FORWARD_FFT);
-	    }
+            // If first block of a GPU input buffer
+            if(rawspec_block_idx % ctx->Nb == 0) {
+                // Wait for work to complete (should return immediately if we're
+                // keeping up)
+                rawspec_wait_for_completion(ctx);
+            }
+            // Feed block to rawspec here
+            rawspec_copy_blocks_to_gpu(ctx, curblock, rawspec_block_idx, 1);
+            // Increment GPU block index
+            rawspec_block_idx++;
+            // If a multiple of Nb blocks have been sent, start processing
+            if(rawspec_block_idx % ctx->Nb == 0) {
+                rawspec_start_processing(ctx, RAWSPEC_FORWARD_FFT);
+            }
         }
 
         /* Mark as free */
@@ -312,7 +317,6 @@ static hashpipe_thread_desc_t rawdisk_thread = {
 
 static __attribute__((constructor)) void ctor()
 {
-  register_hashpipe_thread(&rawdisk_thread);
+    register_hashpipe_thread(&rawdisk_thread);
 }
 
-// vi: set ts=8 sw=2 noet :
