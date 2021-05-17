@@ -15,6 +15,7 @@
 
 typedef struct {
   int fd; // Output file descriptor or socket
+  int fd_ics;
   // TODO? unsigned int total_spectra;
   // TODO? unsigned int total_packets;
   // TODO? unsigned int total_bytes;
@@ -28,6 +29,7 @@ typedef struct {
   // (useful for output threads)
   float * h_pwrbuf;
   size_t h_pwrbuf_size;
+  float * h_icsbuf;
   // TODO? unsigned int Nds;
   // TODO? unsigned int Nf; // Number of fine channels (== Nc*Nts[i])
   // Filterbank header

@@ -40,8 +40,14 @@ rawspec_dump_file_thread_func(void *arg)
     hashpipe_error("hpguppi_rawdisk_thread", "ioprio_set IOPRIO_CLASS_BE");
   }
 
-  write_all(cb_data->fd, cb_data->h_pwrbuf, cb_data->h_pwrbuf_size);
+  if (cb_data->fd_ics && cb_data->h_icsbuf) { //Incoherent sum
+    write_all(cb_data->fd_ics, cb_data->h_icsbuf, cb_data->h_pwrbuf_size);
+  }
+  else { //Not incoherent sum
+    write_all(cb_data->fd, cb_data->h_pwrbuf, cb_data->h_pwrbuf_size);
+  }
 
+  
   return NULL;
 }
 
@@ -102,6 +108,12 @@ rawspec_stop(rawspec_context * ctx)
     if(cb_data[i].fd != -1) {
       close(cb_data[i].fd);
       cb_data[i].fd = -1;
+    }
+    if(ctx->incoherently_sum){
+      if(cb_data[i].fd_ics != -1) {
+	close(cb_data[i].fd_ics);
+	cb_data[i].fd_ics = -1;
+      }
     }
   }
 }
