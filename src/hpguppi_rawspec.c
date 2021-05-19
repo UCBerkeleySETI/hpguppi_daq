@@ -111,8 +111,8 @@ rawspec_stop(rawspec_context * ctx)
     }
     if(ctx->incoherently_sum){
       if(cb_data[i].fd_ics != -1) {
-	close(cb_data[i].fd_ics);
-	cb_data[i].fd_ics = -1;
+        close(cb_data[i].fd_ics);
+        cb_data[i].fd_ics = -1;
       }
     }
   }
