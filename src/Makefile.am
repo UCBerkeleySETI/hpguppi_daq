@@ -41,7 +41,7 @@ hpguppi_threads = hpguppi_ibverbs_pkt_thread.c \
 		  hpguppi_rawdisk_only_thread.c \
 		  hpguppi_fildisk_meerkat_thread.c \
 		  hpguppi_fildisk_only_thread.c \
-		  hpguppi_read_raw_files.c
+		  hpguppi_rawfile_input_thread.c
 
 # This is the hpguppi_daq plugin
 lib_LTLIBRARIES = hpguppi_daq.la
