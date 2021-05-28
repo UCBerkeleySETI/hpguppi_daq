@@ -194,10 +194,7 @@ static void *run(hashpipe_thread_args_t * args)
             fdin = open(fname, open_flags, 0644);
             if (fdin==-1) {
                 hashpipe_error(__FUNCTION__,"Error opening file.");
-                //End of files, put 0s in pktidx
-                hputu8(st.buf, "PKTSTART", 0);
-                hputu8(st.buf, "PKTSTOP", 0);
-                hputu8(st.buf, "PKTIDX", 0);
+                //[TODO] Add extra blk with pktidx=0 to trigger stop.
                 pthread_exit(NULL);
             }
             block_count=0;

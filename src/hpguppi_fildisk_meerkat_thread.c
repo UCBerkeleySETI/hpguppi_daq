@@ -105,7 +105,7 @@ static void *run(hashpipe_thread_args_t * args)
     pthread_cleanup_push((void *)hpguppi_free_psrfits, &pf);
 
     /* Loop */
-    int64_t pktidx=0, pktstart=0, pktstop=0, pktstart_last=0, pktstop_last=0;
+    int64_t pktidx=0, pktstart=0, pktstop=0;
     int64_t piperblk=0, last_pktidx=0;
     uint32_t rawspec_block_idx = 0;
     uint32_t rawspec_zero_block_count = 0;
@@ -137,11 +137,14 @@ static void *run(hashpipe_thread_args_t * args)
         hgeti8(ptr, "PKTSTART", &pktstart);
         hgeti8(ptr, "PKTSTOP", &pktstop);
 
-        //Check for a new start/stop or out of range pktidx
-        if ((pktstart!=pktstart_last && pktstop!=pktstop_last) || pktidx<pktstart ||pktidx>pktstop ) {
-            hashpipe_info(thread_name,
-                "New pointing/recording detected with pktstart=%lu pktstop=%lu",
-                pktstart, pktstop);
+        //Check for out of range pktidx
+        if (pktidx < pktstart || pktidx >= pktstop ) {
+            // Print end of recording conditions
+            hashpipe_info(thread_name, "recording stopped: "
+                "pktstart %lu pktstop %lu pktidx %lu "
+                "rawspec blocks: %u total %u zero",
+                pktstart, pktstop, pktidx,
+                rawspec_block_idx, rawspec_zero_block_count);
             if (first_pass == 0){
                 rawspec_stop(ctx);
                 first_pass = 1;
@@ -154,8 +157,6 @@ static void *run(hashpipe_thread_args_t * args)
         pf.sub.data = (unsigned char *)hpguppi_databuf_data(db, curblock);
 
         if (first_pass==1 && (pktidx>pktstart && pktidx<pktstop)) {
-            pktstart_last = pktstart;
-            pktstop_last = pktstop;
             first_pass = 0;
             hpguppi_read_obs_params(ptr, &gp, &pf);
 
