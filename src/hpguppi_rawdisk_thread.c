@@ -277,6 +277,7 @@ static void *run(hashpipe_thread_args_t * args)
 		    rawspec_block_idx, rawspec_zero_block_count);
 
 		// Reset rawspec related variables
+		rawspec_reset_integration(ctx);
 		rawspec_block_idx = 0;
 		rawspec_zero_block_count = 0;
 		last_pktidx = 0;
@@ -340,6 +341,7 @@ static void *run(hashpipe_thread_args_t * args)
 
 	    // Start new rawspec here, but first ensure that rawspec is stopped
 	    rawspec_stop(ctx); // no-op if already stopped
+	    rawspec_reset_integration(ctx);
 	    rawspec_block_idx = 0;
 	    rawspec_zero_block_count = 0;
 
