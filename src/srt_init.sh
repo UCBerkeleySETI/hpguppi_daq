@@ -12,8 +12,24 @@ fi
 
 destip=`ifconfig eth4 | awk '/inet addr/{print substr($2,6)}'`
 
+SCHAN=64
+case `hostname` in
+  blc00)
+    SCHAN=64
+    ;;
+  blc01)
+    SCHAN=128
+    ;;
+esac
+
 $(dirname $0)/hpguppi_init.sh $runner srt 0 \
-  -o DESTIP=$destip \
+  -o TELESCOP=SRT    \
+  -o DESTIP=$destip  \
+  -o OBSBW=187.5     \
+  -o OBSNCHAN=64     \
+  -o OBSSCHAN=$SCHAN \
+  -o PKTSTART=0      \
+  -o DWELL=0         \
   "${@}"
 
 sleep 1
