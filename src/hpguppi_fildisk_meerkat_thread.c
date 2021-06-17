@@ -167,9 +167,15 @@ static void *run(hashpipe_thread_args_t * args)
             hgetu4(ptr, "NBITS", &ctx->Nbps); //Bit per sample
             ctx->Ntpb = calc_ntime_per_block(BLOCK_DATA_SIZE, ctx->Nc); //Time sample per blk
 
-            //TODO: Figure out what these two should be, either hardcode it or pub/sub?
+            // Preserve F Engine resolution, regardless of F Engine mode (1K,4K,32K).
             ctx->Nts[0] = 1; //FFT size, time samples required
-            ctx->Nas[0] = 1; //No. fine spectra to accum
+            // Accumulate 204800 spectra per dump.  This number was chosen
+            // because it is an easy(ish) number to remmeber that gives
+            // (nearly) 1 second integrations in 4K mode.  1K mode gets
+            // (nearly) 0.25 second integration and 32K mode gets (nearly) 8
+            // second integrations, but all modes have the same output data
+            // rate.
+            ctx->Nas[0] = 204800; //No. fine spectra to accum
             hashpipe_info(thread_name, 
                 "Ntpb %d Nts[0]=%d Nas=%d\n", ctx->Ntpb, ctx->Nts[0], ctx->Nas[0]);
 
