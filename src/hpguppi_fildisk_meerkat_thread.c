@@ -169,14 +169,15 @@ static void *run(hashpipe_thread_args_t * args)
 
             // Preserve F Engine resolution, regardless of F Engine mode (1K,4K,32K).
             ctx->Nts[0] = 1; //FFT size, time samples required
-            // Accumulate 204800 spectra per dump.  This number was chosen
-            // because it is an easy(ish) number to remmeber that gives
-            // (nearly) 1 second integrations in 4K mode.  1K mode gets
-            // (nearly) 0.25 second integration and 32K mode gets (nearly) 8
-            // second integrations, but all modes have the same output data
-            // rate.
-            ctx->Nas[0] = 204800; //No. fine spectra to accum
-            hashpipe_info(thread_name, 
+            // Accumulate 256*1024 spectra per dump.  This number was chosen
+            // because it is an easy(ish) number to remmeber that is a power of
+            // two (NB: need to divide ntime samples per block or vice versa!)
+            // and results in modest dump rates of ~1.25 second integrations in
+            // 4K mode.  1K mode gets ~0.31 second integration and 32K mode
+            // gets ~10 second integrations, but all modes have the same output
+            // data rate.
+            ctx->Nas[0] = 256*1024; //No. fine spectra to accum
+            hashpipe_info(thread_name,
                 "Ntpb %d Nts[0]=%d Nas=%d\n", ctx->Ntpb, ctx->Nts[0], ctx->Nas[0]);
 
             int Nblk = ctx->Nts[0]*ctx->Nas[0]/ctx->Ntpb;
