@@ -138,17 +138,18 @@ static void *run(hashpipe_thread_args_t * args)
         hgeti8(ptr, "PKTSTOP", &pktstop);
 
         //Check for out of range pktidx
-        if (pktidx < pktstart || pktidx >= pktstop ) {
+        if (!first_pass && (pktidx < pktstart || pktidx >= pktstop)) {
             // Print end of recording conditions
             hashpipe_info(thread_name, "recording stopped: "
                 "pktstart %lu pktstop %lu pktidx %lu "
                 "rawspec blocks: %u total %u zero",
                 pktstart, pktstop, pktidx,
                 rawspec_block_idx, rawspec_zero_block_count);
-            if (first_pass == 0){
-                rawspec_stop(ctx);
-                first_pass = 1;
-            }
+
+            // Set flag for next recording
+            first_pass = 1;
+            // Stop rawspec
+            rawspec_stop(ctx);
             // Reset rawspec related variables
             rawspec_reset_integration(ctx);
             rawspec_block_idx = 0;
