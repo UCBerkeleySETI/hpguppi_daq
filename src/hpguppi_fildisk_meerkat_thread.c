@@ -36,6 +36,10 @@ static const char BACKEND_RECORD[] =
 
 static void *run(hashpipe_thread_args_t * args)
 {
+    unsigned int Nant = 0; // Number of antenna (Nc is a multiple of this)
+    unsigned int Nc   = 0; // Number of coarse channels
+    unsigned int Ntpb = 0; // Number of time samples per block
+    unsigned int Nbps = 0; // Number of bits per sample
     rawspec_context * ctx;
     rawspec_callback_data_t * cb_data;
 
@@ -81,7 +85,7 @@ static void *run(hashpipe_thread_args_t * args)
         cb_data[i].fb_hdr.machine_id = 20;
         cb_data[i].fb_hdr.telescope_id = -1; // Unknown (updated later)
         cb_data[i].fb_hdr.data_type = 1;
-        cb_data[i].fb_hdr.nbeams =  1; 
+        cb_data[i].fb_hdr.nbeams =  1;
         cb_data[i].fb_hdr.ibeam  =  -1; //Not used
         cb_data[i].fb_hdr.nbits  = 32;
         cb_data[i].fb_hdr.nifs   = ctx->Npolout[i];
@@ -93,6 +97,7 @@ static void *run(hashpipe_thread_args_t * args)
         }
     }
 
+    ctx->dump_callback = rawspec_dump_callback;
     ctx->user_data = cb_data;
 
     /* Read in (legacy) general parameters */
@@ -164,9 +169,10 @@ static void *run(hashpipe_thread_args_t * args)
             hpguppi_read_obs_params(ptr, &gp, &pf);
 
             //Set up rawspec and context--------------------------------------------
-            hgetu4(ptr, "OBSNCHAN", &ctx->Nc); //Coarse channels
-            hgetu4(ptr, "NBITS", &ctx->Nbps); //Bit per sample
-            ctx->Ntpb = calc_ntime_per_block(BLOCK_DATA_SIZE, ctx->Nc); //Time sample per blk
+            hgetu4(ptr, "NANTS", &Nant);  // Number of antennas
+            hgetu4(ptr, "OBSNCHAN", &Nc); // Number of coarse channels
+            hgetu4(ptr, "NBITS", &Nbps);  // Bits per sample
+            Ntpb = calc_ntime_per_block(BLOCK_DATA_SIZE, Nc); // Time sample per blk
 
             // Preserve F Engine resolution, regardless of F Engine mode (1K,4K,32K).
             ctx->Nts[0] = 1; //FFT size, time samples required
@@ -179,41 +185,64 @@ static void *run(hashpipe_thread_args_t * args)
             // data rate.
             ctx->Nas[0] = 256*1024; //No. fine spectra to accum
             hashpipe_info(thread_name,
-                "Ntpb %d Nts[0]=%d Nas=%d\n", ctx->Ntpb, ctx->Nts[0], ctx->Nas[0]);
+                "Ntpb=%d Nts[0]=%d Nas=%d\n", Ntpb, ctx->Nts[0], ctx->Nas[0]);
 
-            int Nblk = ctx->Nts[0]*ctx->Nas[0]/ctx->Ntpb;
+#if 0
+            int Nblk = ctx->Nts[0]*ctx->Nas[0]/Ntpb;
             if (Nblk == 0) Nblk = 1; //Read at least one blk
-            float sizeofblk = ctx->Nc*ctx->Ntpb*ctx->Np*ctx->Nbps*2 /1024./1024./8. ; //in MB
+            float sizeofblk = Nc*Ntpb*ctx->Np*Nbps*2 /1024./1024./8. ; //in MB
             float Inputsize = Nblk*sizeofblk /1024.; //in GB
+
             hashpipe_info(thread_name,
                 "No. of blk required=%d size per blk=%f MB Inputsize=%.1f GB\n", Nblk, sizeofblk, Inputsize);
+#endif // 0
 
-            //Assign weights for the incoherent sum, currently just 1s
-            hgetu4(ptr, "NANTS", &ctx->Nant);
-            ctx->Naws = ctx->Nant;
-            ctx->Aws = malloc(ctx->Nant*sizeof(float));
-            for(int i=0; i < ctx->Nant; i++){
-                ctx->Aws[i] = 1.;
+            // If block dimensions have changed (we assume Np and
+            // input_conjugated never change)
+            if(Nc != ctx->Nc || Nbps != ctx->Nbps || Ntpb != ctx->Ntpb
+            || Nant != ctx->Nant) {
+              // Cleanup previous setup, if initialized
+              if(ctx->Ntpb != 0) {
+                rawspec_cleanup(ctx);
+              }
+              // If number of antennas has changed
+              if(Nant += ctx->Nant) {
+                ctx->Naws = Nant;
+                if(ctx->Aws) {
+                  free(ctx->Aws);
+                }
+                ctx->Aws = malloc(ctx->Naws*sizeof(float));
+                //Assign weights for the incoherent sum, currently just 1s
+                for(int i=0; i < ctx->Naws; i++){
+                    ctx->Aws[i] = 1.0f;
+                }
+              }
+
+              // Remember new dimensions
+              ctx->Nant = Nant;
+              ctx->Nc   = Nc;
+              ctx->Ntpb = Ntpb;
+              ctx->Nbps = Nbps;
+
+              // Initialize for new dimensions and/or conjugation
+              ctx->Nb = 0;           // auto-calculate
+
+              // Initialize rawspec
+              if(rawspec_initialize(ctx)) {
+                  hashpipe_error(thread_name,
+                      "rawspec initialization failed !!!");
+                  pthread_exit(NULL);
+              }
             }
-
-            ctx->dump_callback = rawspec_dump_callback;
-
-            // Initialize rawspec
-            if(rawspec_initialize(ctx)) {
-                hashpipe_error(thread_name,
-                    "rawspec initialization failed !!!");
-                pthread_exit(NULL);
-            } else {
-                // Copy fields from ctx to cb_data
-                for(i=0; i<ctx->No; i++) {
-                    if (ctx->incoherently_sum) {
-                        cb_data[i].h_pwrbuf_size = ctx->h_pwrbuf_size[i]/ctx->Nant;
-                        cb_data[i].h_icsbuf = ctx->h_icsbuf[i];
-                    }
-                    else {
-                        cb_data[i].h_pwrbuf_size = ctx->h_pwrbuf_size[i];
-                        cb_data[i].h_pwrbuf = ctx->h_pwrbuf[i]; //Output power buffer
-                    }
+            // Copy fields from ctx to cb_data
+            for(i=0; i<ctx->No; i++) {
+                if (ctx->incoherently_sum) {
+                    cb_data[i].h_pwrbuf_size = ctx->h_pwrbuf_size[i]/ctx->Nant;
+                    cb_data[i].h_icsbuf = ctx->h_icsbuf[i];
+                }
+                else {
+                    cb_data[i].h_pwrbuf_size = ctx->h_pwrbuf_size[i];
+                    cb_data[i].h_pwrbuf = ctx->h_pwrbuf[i]; //Output power buffer
                 }
             }
 
