@@ -354,8 +354,9 @@ static void *run(hashpipe_thread_args_t * args)
                     "pktidx %lu last_pktidx %lu piperblk %lu",
                     pktidx, last_pktidx, piperblk);
                 hashpipe_warn(thread_name,
-                    "treating %lu missing blocks as zeros",
-                    (pktidx - last_pktidx - 1) / piperblk);
+                    "treating %lu missing blocks (%lu-%lu) as zeros",
+                    (pktidx - last_pktidx - 1) / piperblk, rawspec_block_idx,
+                    rawspec_block_idx+((pktidx - last_pktidx - 1) / piperblk)-1);
 
                 while(pktidx > last_pktidx + piperblk) {
                     last_pktidx += piperblk;
@@ -367,8 +368,6 @@ static void *run(hashpipe_thread_args_t * args)
                     }
 
                     // Feed block of zeros to rawspec here
-                    hashpipe_info(thread_name,
-                        "rawspec block %d is zeros", rawspec_block_idx);
                     rawspec_zero_blocks_to_gpu(ctx, rawspec_block_idx, 1);
                     // Increment GPU block index
                     rawspec_block_idx++;
