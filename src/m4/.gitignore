@@ -7,3 +7,4 @@
 !ax_gcc_x86_cpu_supports.m4
 !hashpipe.m4
 !rawspec.m4
+!coherent_beamformer.m4
