@@ -31,11 +31,20 @@ AX_CHECK_HASHPIPE
 # Check for rawspec
 AX_CHECK_RAWSPEC
 
+# Check for coherent beamformer
+AX_CHECK_CBF
+
 # Checks for libraries.
 #AC_CHECK_LIB([pthread], [pthread_create])
 AC_CHECK_LIB([m], [cos])
 #AC_CHECK_LIB([rt], [clock_gettime])
 #AC_CHECK_LIB([z], [crc32])
+
+AC_ARG_WITH([libcoherent_beamformer],
+            AC_HELP_STRING([--with-libcoherent_beamformer=DIR],
+                           [Location of CBF library]),
+            [LIBCBFDIR="$withval"],
+            [LIBCBFDIR="."])
 
 AC_ARG_WITH([libsla],
             AC_HELP_STRING([--with-libsla=DIR],
