@@ -1,6 +1,6 @@
-/* hpguppi_coherent_bf_thread_raw.c
+/* hpguppi_coherent_bf_thread_fb.c
  *
- * Coherently beamform and write databuf blocks out to GUPPI RAW files on disk.
+ * Coherently beamform and write databuf blocks out to filterbank files on disk.
  */
 
 #define _GNU_SOURCE 1
@@ -19,6 +19,13 @@
 #include "coherent_beamformer_char_in.h"
 
 #include "hashpipe.h"
+
+// Use rawpsec_fbutils because it contains all of the necessary functions to write headers to filterbank files
+// This might change in the near future to make this library completely separate from rawspec
+#include "rawspec_fbutils.h"
+// Use rawpsec_rawutils because it contains all of the necessary functions to parse raw headers orginally from GUPPI RAW files
+// This might change in the near future to make this library completely separate from rawspec
+#include "rawspec_rawutils.h"
 
 #include "hpguppi_databuf.h"
 #include "hpguppi_params.h"
@@ -57,6 +64,37 @@ static int safe_close(int *pfd) {
     if (pfd==NULL) return 0;
     fsync(*pfd);
     return close(*pfd);
+}
+
+void
+update_fb_hdrs_from_raw_hdr_cbf(fb_hdr_t fb_hdr, const char *p_rawhdr)
+{
+  rawspec_raw_hdr_t raw_hdr;
+
+  rawspec_raw_parse_header(p_rawhdr, &raw_hdr);
+  hashpipe_info(__FUNCTION__,
+      "beam_id = %d/%d", raw_hdr.beam_id, raw_hdr.nbeam);
+
+  // Update filterbank headers based on raw params and Nts etc.
+    // Same for all products
+    fb_hdr.telescope_id = fb_telescope_id(raw_hdr.telescop);
+    fb_hdr.src_raj = raw_hdr.ra;
+    fb_hdr.src_dej = raw_hdr.dec;
+    fb_hdr.tstart = raw_hdr.mjd;
+    fb_hdr.ibeam = raw_hdr.beam_id;
+    fb_hdr.nbeams = raw_hdr.nbeam;
+    strncpy(fb_hdr.source_name, raw_hdr.src_name, 80);
+    fb_hdr.source_name[80] = '\0';
+    // Output product dependent
+    fb_hdr.foff = raw_hdr.obsbw/raw_hdr.obsnchan/N_TIME;
+    // This computes correct fch1 for odd or even number of fine channels
+    fb_hdr.fch1 = raw_hdr.obsfreq
+      - raw_hdr.obsbw*(raw_hdr.obsnchan-1)/(2*raw_hdr.obsnchan)
+      - (N_TIME/2) * fb_hdr.foff
+      ;//TODO + schan * raw_hdr.obsbw / raw_hdr.obsnchan; // Adjust for schan
+    fb_hdr.nchans = N_COARSE_FREQ * N_TIME;
+    fb_hdr.tsamp = raw_hdr.tbin * N_TIME * 256*1024;
+    // TODO az_start, za_start
 }
 
 #if 0
@@ -116,15 +154,26 @@ static void *run(hashpipe_thread_args_t * args)
     /* Loop */
     int64_t pktidx=0, pktstart=0, pktstop=0;
     int blocksize=N_BF_POW*sizeof(float); // Size of beamformer output
-    int len=0;
     int curblock=0;
     int block_count=0, blocks_per_file=128, filenum=0;
     int got_packet_0=0, first=1;
-    char *ptr, *hend;
+    char *ptr;
     int open_flags = 0;
-    int directio = 0;
     int rv = 0;
+    double obsbw;
+    double tbin;
+    double obsfreq;
     //int header_size = 0;
+
+    // Filterbank file header initialization
+    fb_hdr_t fb_hdr;
+    fb_hdr.machine_id = 20;
+    fb_hdr.telescope_id = -1; // Unknown (updated later)
+    fb_hdr.data_type = 1;
+    fb_hdr.nbeams =  1;
+    fb_hdr.ibeam  =  -1; //Not used
+    fb_hdr.nbits  = 32;
+    fb_hdr.nifs   = 1;
 
     // Generate weights or coefficients (using simulate_coefficients() for now)
     float* tmp_coefficients = simulate_coefficients();
@@ -201,11 +250,68 @@ static void *run(hashpipe_thread_args_t * args)
         /* Set up data ptr for quant routines */
         pf.sub.data = (unsigned char *)hpguppi_databuf_data(db, curblock);
 
+	// Update filterbank headers based on raw params and Nts etc.
+	// Possibly here
+	update_fb_hdrs_from_raw_hdr_cbf(fb_hdr, ptr);
+
+	hgetr8(ptr, "OBSBW", &obsbw);
+        hgetr8(ptr,"TBIN", &tbin);
+        hgetr8(ptr,"OBSFREQ", &obsfreq);
+
         // Wait for packet 0 before starting write
 	// "packet 0" is the first packet/block of the new recording,
 	// it is not necessarily pktidx == 0.
         if (got_packet_0==0 && gp.stt_valid==1) {
             got_packet_0 = 1;
+
+	    char fname[256];
+            // Create the output directory if needed
+            char datadir[1024];
+            strncpy(datadir, pf.basefilename, 1023);
+            char *last_slash = strrchr(datadir, '/');
+            if (last_slash!=NULL && last_slash!=datadir) {
+                *last_slash = '\0';
+                hashpipe_info(thread_name,
+                    "Using directory '%s' for output", datadir);
+                if(mkdir_p(datadir, 0755) == -1) {
+                    hashpipe_error(thread_name, "mkdir_p(%s)", datadir);
+                    pthread_exit(NULL);
+                }
+            }
+
+            sprintf(fname, "%s.%04d-cbf.fil", pf.basefilename, filenum);
+            hashpipe_info(thread_name, "Opening fil file '%s'", fname);
+            last_slash = strrchr(fname, '/');
+            if(last_slash) {
+                strncpy(fb_hdr.rawdatafile, last_slash+1, 80);
+            } else {
+                strncpy(fb_hdr.rawdatafile, fname, 80);
+            }
+            fb_hdr.rawdatafile[80] = '\0';
+
+            
+            fdraw = open(fname, O_CREAT|O_WRONLY|O_TRUNC|O_SYNC, 0644);
+            if(fdraw == -1) {
+                // If we can't open this output file, we probably won't be able to
+                // open any more output files, so print message and bail out.
+                hashpipe_error(thread_name,
+                    "cannot open filterbank output file, giving up");
+                pthread_exit(NULL);
+            }
+            posix_fadvise(fdraw, 0, 0, POSIX_FADV_DONTNEED);
+
+            //Fix some header stuff here due to multi-antennas
+	    // Need to understand and appropriately modify these values if necessary
+	    // Default values for now
+            fb_hdr.foff = obsbw;
+            fb_hdr.nchans = N_COARSE_FREQ * N_TIME;
+            fb_hdr.fch1 = obsfreq;
+            fb_hdr.nbeams =  64;
+            fb_hdr.tsamp = tbin * N_TIME * 256*1024;
+
+
+
+/*
             hpguppi_read_obs_params(ptr, &gp, &pf);
             directio = hpguppi_read_directio_mode(ptr);
             char fname[256];
@@ -233,6 +339,8 @@ static void *run(hashpipe_thread_args_t * args)
                 hashpipe_error(thread_name, "Error opening file.");
                 pthread_exit(NULL);
             }
+*/
+
 
         }
 
@@ -241,13 +349,9 @@ static void *run(hashpipe_thread_args_t * args)
             close(fdraw);
             filenum++;
             char fname[256];
-            sprintf(fname, "%s.%4.4d.raw", pf.basefilename, filenum);
-            directio = hpguppi_read_directio_mode(ptr);
+            sprintf(fname, "%s.%04d-cbf.fil", pf.basefilename, filenum);
             open_flags = O_CREAT|O_RDWR|O_SYNC;
-            if(directio) {
-              open_flags |= O_DIRECT;
-            }
-            fprintf(stderr, "Opening next raw file '%s' (directio=%d)\n", fname, directio);
+            fprintf(stderr, "Opening next fil file '%s'\n", fname);
             fdraw = open(fname, open_flags, 0644);
             if (fdraw==-1) {
                 hashpipe_error(thread_name, "Error opening file.");
@@ -262,7 +366,7 @@ static void *run(hashpipe_thread_args_t * args)
         /* Get full data block size */
         //hgeti4(ptr, "BLOCSIZE", &blocksize);
 
-        /* If we got packet 0, write data to disk */
+        /* If we got packet 0, process and write data to disk */
         if (got_packet_0) {
 
             /* Note writing status */
@@ -270,63 +374,25 @@ static void *run(hashpipe_thread_args_t * args)
             hputs(st->buf, status_key, "writing");
             hashpipe_status_unlock_safe(st);
 
-            /* Write header to file */
-            hend = ksearch(ptr, "END");
-            len = (hend-ptr)+80;
-
-            // If BACKEND record is not present, insert it as first record.
-            // TODO: Verify that we have room to insert the record.
-            if(!ksearch(ptr, "BACKEND")) {
-                // Move exsiting records to make room for new first record
-                memmove(ptr+80, ptr, len);
-                // Copy in BACKEND_RECORD string
-                strncpy(ptr, BACKEND_RECORD, 80);
-                // Increase len by 80 to account for the added record
-                len += 80;
-            }
-
-            // Adjust length for any padding required for DirectIO
-            if(directio) {
-                // Round up to next multiple of 512
-                len = (len+511) & ~511;
-            }
-
-	    //header_size = len;
-	    //printf("Size of header = %d\n", header_size);
-
-            /* Write header (and padding, if any) */
-            rv = write_all(fdraw, ptr, len);
-            if (rv != len) {
-                char msg[100];
-                perror(thread_name);
-                sprintf(msg, "Error writing data (ptr=%p, len=%d, rv=%d)", ptr, len, rv);
-                hashpipe_error(thread_name, msg);
-            }
+	    /* Write filterbank header to output file */
+            fb_fd_write_header(fdraw, &fb_hdr);
 
             /* Write data */
 	    // gpu processing function here, I think...
 	    output_data = run_beamformer((signed char *)&db->block[curblock].data, tmp_coefficients);
 
-            //ptr = hpguppi_databuf_data(db, curblock);
-            len = blocksize;
-            if(directio) {
-                // Round up to next multiple of 512
-                len = (len+511) & ~511;
-            }
-            //rv = write_all(fdraw, ptr, (size_t)len);
-	    rv = write_all(fdraw, output_data, (size_t)len);
-            if (rv != len) {
+	    // This may be okay to write to filterbank files, but I'm not entirely confident
+	    rv = write_all(fdraw, output_data, (size_t)blocksize);
+            if (rv != blocksize) {
                 char msg[100];
                 perror(thread_name);
-                //sprintf(msg, "Error writing data (ptr=%p, len=%d, rv=%d)", ptr, len, rv);
-		sprintf(msg, "Error writing data (output_data=%p, len=%d, rv=%d)", output_data, len, rv);
+                //sprintf(msg, "Error writing data (ptr=%p, blocksize=%d, rv=%d)", ptr, blocksize, rv);
+		sprintf(msg, "Error writing data (output_data=%p, blocksize=%d, rv=%d)", output_data, blocksize, rv);
                 hashpipe_error(thread_name, msg);
             }
 
-	    if(!directio) {
-	      /* flush output */
-	      fsync(fdraw);
-	    }
+	    /* flush output */
+	    fsync(fdraw);
 
             /* Increment counter */
             block_count++;

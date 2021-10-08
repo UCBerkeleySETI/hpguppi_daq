@@ -67,7 +67,7 @@ static int safe_close(int *pfd) {
 }
 
 void
-update_fb_hdrs_from_raw_hdr(fb_hdr_t fb_hdr, const char *p_rawhdr)
+update_fb_hdrs_from_raw_hdr_cbf(fb_hdr_t fb_hdr, const char *p_rawhdr)
 {
   rawspec_raw_hdr_t raw_hdr;
 
@@ -157,9 +157,8 @@ static void *run(hashpipe_thread_args_t * args)
     int curblock=0;
     int block_count=0, blocks_per_file=128, filenum=0;
     int got_packet_0=0, first=1;
-    char *ptr, *hend;
+    char *ptr,
     int open_flags = 0;
-    int directio = 0;
     int rv = 0;
     double obsbw;
     double tbin;
@@ -253,7 +252,7 @@ static void *run(hashpipe_thread_args_t * args)
 
 	// Update filterbank headers based on raw params and Nts etc.
 	// Possibly here
-	update_fb_hdrs_from_raw_hdr(fb_hdr, ptr);
+	update_fb_hdrs_from_raw_hdr_cbf(fb_hdr, ptr);
 
 	hgetr8(ptr, "OBSBW", &obsbw);
         hgetr8(ptr,"TBIN", &tbin);
@@ -304,14 +303,9 @@ static void *run(hashpipe_thread_args_t * args)
             //Fix some header stuff here due to multi-antennas
 	    // Need to understand and appropriately modify these values if necessary
 	    // Default values for now
-            fb_hdr.foff = obsbw/(N_COARSE_FREQ/N_ANT)/N_TIME;
+            fb_hdr.foff = obsbw;
             fb_hdr.nchans = N_COARSE_FREQ * N_TIME;
-            fb_hdr.fch1 = obsfreq
-                - obsbw*((N_COARSE_FREQ/N_ANT)-1)
-                / (2*N_COARSE_FREQ/N_ANT)
-                - (N_TIME/2) * fb_hdr.foff
-                + (0 % (N_COARSE_FREQ/N_ANT)) // Adjust for schan
-                * obsbw / (N_COARSE_FREQ/N_ANT);
+            fb_hdr.fch1 = obsfreq;
             fb_hdr.nbeams =  64;
             fb_hdr.tsamp = tbin * N_TIME * 256*1024;
 

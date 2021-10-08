@@ -262,7 +262,7 @@ static void *run(hashpipe_thread_args_t * args)
         /* Get full data block size */
         //hgeti4(ptr, "BLOCSIZE", &blocksize);
 
-        /* If we got packet 0, write data to disk */
+        /* If we got packet 0, process and write data to disk */
         if (got_packet_0) {
 
             /* Note writing status */
