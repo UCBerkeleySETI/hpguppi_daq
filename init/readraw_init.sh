@@ -51,7 +51,7 @@ then
         shift
     fi
 else
-    echo 'Unsupported mode. Choose between "readonly", "cp", "fil".'
+    echo 'Unsupported mode. Choose between "readonly", "cp", "fil", "cbf".'
     echo Exiting...
     exit
 fi
