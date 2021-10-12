@@ -157,7 +157,7 @@ static void *run(hashpipe_thread_args_t * args)
     int curblock=0;
     int block_count=0, blocks_per_file=128, filenum=0;
     int got_packet_0=0, first=1;
-    char *ptr,
+    char *ptr;
     int open_flags = 0;
     int rv = 0;
     double obsbw;
@@ -250,14 +250,6 @@ static void *run(hashpipe_thread_args_t * args)
         /* Set up data ptr for quant routines */
         pf.sub.data = (unsigned char *)hpguppi_databuf_data(db, curblock);
 
-	// Update filterbank headers based on raw params and Nts etc.
-	// Possibly here
-	update_fb_hdrs_from_raw_hdr_cbf(fb_hdr, ptr);
-
-	hgetr8(ptr, "OBSBW", &obsbw);
-        hgetr8(ptr,"TBIN", &tbin);
-        hgetr8(ptr,"OBSFREQ", &obsfreq);
-
         // Wait for packet 0 before starting write
 	// "packet 0" is the first packet/block of the new recording,
 	// it is not necessarily pktidx == 0.
@@ -278,6 +270,14 @@ static void *run(hashpipe_thread_args_t * args)
                     pthread_exit(NULL);
                 }
             }
+
+	    // Update filterbank headers based on raw params and Nts etc.
+	    // Possibly here
+	    update_fb_hdrs_from_raw_hdr_cbf(fb_hdr, ptr);
+
+	    hgetr8(ptr, "OBSBW", &obsbw);
+	    hgetr8(ptr,"TBIN", &tbin);
+	    hgetr8(ptr,"OBSFREQ", &obsfreq);
 
             sprintf(fname, "%s.%04d-cbf.fil", pf.basefilename, filenum);
             hashpipe_info(thread_name, "Opening fil file '%s'", fname);
