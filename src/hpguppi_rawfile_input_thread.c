@@ -25,6 +25,8 @@
 #include "hpguppi_databuf.h"
 #include "hpguppi_params.h"
 
+#include "coherent_beamformer_char_in.h"
+
 int get_header_size(int fdin, char * header_buf, size_t len)
 {
     int rv;
@@ -119,6 +121,9 @@ static void *run(hashpipe_thread_args_t * args)
     char header_buf[MAX_HDR_SIZE];
     int open_flags = O_RDONLY;
     int directio = 0;
+    int sim_flag = 1; // Set to 1 if you'd like to use simulated data rather than the payload from the RAW file
+    char * sim_data; // Initialize simulated data array
+    sim_data = (char *)simulate_data(); // Generate block of simulated data
 
     while (run_threads()) {
         hashpipe_status_lock_safe(&st);
@@ -176,7 +181,13 @@ static void *run(hashpipe_thread_args_t * args)
         ptr = hpguppi_databuf_data(db, block_idx);
         lseek(fdin, headersize-MAX_HDR_SIZE, SEEK_CUR);
         blocsize = get_block_size(header_buf, MAX_HDR_SIZE);
-        read_fully(fdin, ptr, blocsize);
+	//printf("Block size: %d, and  N_INPUT: %lu \n", blocsize, N_INPUT);
+	if(sim_flag == 0){
+            read_fully(fdin, ptr, blocsize);
+        } else{
+	    memcpy(ptr, sim_data, N_INPUT);
+	    ptr += N_INPUT;
+	}
 
         // Mark block as full
         hpguppi_input_databuf_set_filled(db, block_idx);

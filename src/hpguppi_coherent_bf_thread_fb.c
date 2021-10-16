@@ -1,6 +1,6 @@
 /* hpguppi_coherent_bf_thread_fb.c
  *
- * Coherently beamform and write databuf blocks out to filterbank files on disk.
+ * Perform coherent beamforming and write databuf blocks out to filterbank files on disk.
  */
 
 #define _GNU_SOURCE 1
@@ -310,7 +310,6 @@ static void *run(hashpipe_thread_args_t * args)
             fb_hdr.tsamp = tbin * N_TIME * 256*1024;
 
 
-
 /*
             hpguppi_read_obs_params(ptr, &gp, &pf);
             directio = hpguppi_read_directio_mode(ptr);
@@ -380,6 +379,16 @@ static void *run(hashpipe_thread_args_t * args)
             /* Write data */
 	    // gpu processing function here, I think...
 	    output_data = run_beamformer((signed char *)&db->block[curblock].data, tmp_coefficients);
+
+	    /* Set beamformer output (CUDA kernel before conversion to power) that is summing to zero before moving on to next block*/
+	    set_to_zero();
+
+	    printf("First element of output data: %g\n", output_data[0]);
+	    printf("Last non-zero element of output data: %g\n", output_data[8388317]);
+	    printf("First zero element of output data: %g\n", output_data[8388318]);
+	    printf("Random element after zeros start of output data: %g\n", output_data[8400000]);
+	    printf("Last element of output data: %g\n", output_data[33554431]);
+	    //printf("Block size cast as size_t: %lu\n", (size_t)blocksize);
 
 	    // This may be okay to write to filterbank files, but I'm not entirely confident
 	    rv = write_all(fdraw, output_data, (size_t)blocksize);
