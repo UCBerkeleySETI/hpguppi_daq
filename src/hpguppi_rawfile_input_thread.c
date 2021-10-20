@@ -90,9 +90,16 @@ ssize_t read_fully(int fd, void * buf, size_t bytes_to_read)
                 return -1;
             }
         }
-        buf += bytes_read;
-        bytes_to_read -= bytes_read;
-        total_bytes_read += bytes_read;
+	if(bytes_read < BLOCK_DATA_SIZE){
+	        buf += BLOCK_DATA_SIZE;
+	        bytes_to_read -= bytes_read;
+	        total_bytes_read += bytes_read;
+		printf("bytes_read: %zd, and  BLOCK_DATA_SIZE: %d \n", bytes_read, BLOCK_DATA_SIZE);
+	}else{
+	        buf += bytes_read;
+	        bytes_to_read -= bytes_read;
+	        total_bytes_read += bytes_read;
+	}
     }
     return total_bytes_read;
 }
@@ -121,9 +128,10 @@ static void *run(hashpipe_thread_args_t * args)
     char header_buf[MAX_HDR_SIZE];
     int open_flags = O_RDONLY;
     int directio = 0;
-    int sim_flag = 1; // Set to 1 if you'd like to use simulated data rather than the payload from the RAW file
+    int sim_flag = 0; // Set to 1 if you'd like to use simulated data rather than the payload from the RAW file
     char * sim_data; // Initialize simulated data array
     sim_data = (char *)simulate_data(); // Generate block of simulated data
+    ssize_t read_blocsize;
 
     while (run_threads()) {
         hashpipe_status_lock_safe(&st);
@@ -181,9 +189,13 @@ static void *run(hashpipe_thread_args_t * args)
         ptr = hpguppi_databuf_data(db, block_idx);
         lseek(fdin, headersize-MAX_HDR_SIZE, SEEK_CUR);
         blocsize = get_block_size(header_buf, MAX_HDR_SIZE);
-	//printf("Block size: %d, and  N_INPUT: %lu \n", blocsize, N_INPUT);
+	printf("Block size: %d, and  BLOCK_DATA_SIZE: %d \n", blocsize, BLOCK_DATA_SIZE);
+	printf("header size: %d, and  MAX_HDR_SIZE: %d \n", headersize, MAX_HDR_SIZE);
 	if(sim_flag == 0){
-            read_fully(fdin, ptr, blocsize);
+	    //lseek(fdin, block_idx*BLOCK_DATA_SIZE, SEEK_CUR);
+	    read_blocsize = read_fully(fdin, ptr, blocsize);
+	    printf("Number of bytes read in read_fully(): %zd \n", read_blocsize);
+	    printf("First element of buffer: %d \n", ptr[0]);
         } else{
 	    memcpy(ptr, sim_data, N_INPUT);
 	    ptr += N_INPUT;
@@ -218,7 +230,8 @@ static void *run(hashpipe_thread_args_t * args)
 
     // Thread success!
     if (fdin!=-1) {
-         close(fdin);
+	printf("Closing file! \n");
+        close(fdin);
     }
     return THREAD_OK;
 

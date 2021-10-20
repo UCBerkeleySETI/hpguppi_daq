@@ -383,11 +383,11 @@ static void *run(hashpipe_thread_args_t * args)
 	    /* Set beamformer output (CUDA kernel before conversion to power) that is summing to zero before moving on to next block*/
 	    set_to_zero();
 
-	    printf("First element of output data: %g\n", output_data[0]);
-	    printf("Last non-zero element of output data: %g\n", output_data[8388317]);
-	    printf("First zero element of output data: %g\n", output_data[8388318]);
-	    printf("Random element after zeros start of output data: %g\n", output_data[8400000]);
-	    printf("Last element of output data: %g\n", output_data[33554431]);
+	    printf("First element of output data: %f\n", output_data[0]);
+	    printf("Last non-zero element of output data: %f\n", output_data[8388317]);
+	    printf("First zero element of output data: %f\n", output_data[8388318]);
+	    printf("Random element after zeros start of output data: %f\n", output_data[8400000]);
+	    printf("Last element of output data: %f\n", output_data[33554431]);
 	    //printf("Block size cast as size_t: %lu\n", (size_t)blocksize);
 
 	    // This may be okay to write to filterbank files, but I'm not entirely confident
