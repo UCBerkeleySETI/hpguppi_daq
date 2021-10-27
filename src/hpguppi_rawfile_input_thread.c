@@ -90,16 +90,9 @@ ssize_t read_fully(int fd, void * buf, size_t bytes_to_read)
                 return -1;
             }
         }
-	if(bytes_read < BLOCK_DATA_SIZE){
-	        buf += BLOCK_DATA_SIZE;
-	        bytes_to_read -= bytes_read;
-	        total_bytes_read += bytes_read;
-		printf("bytes_read: %zd, and  BLOCK_DATA_SIZE: %d \n", bytes_read, BLOCK_DATA_SIZE);
-	}else{
-	        buf += bytes_read;
-	        bytes_to_read -= bytes_read;
-	        total_bytes_read += bytes_read;
-	}
+        buf += bytes_read;
+        bytes_to_read -= bytes_read;
+        total_bytes_read += bytes_read;
     }
     return total_bytes_read;
 }
@@ -179,6 +172,7 @@ static void *run(hashpipe_thread_args_t * args)
         hashpipe_status_unlock_safe(&st);
 
         directio = hpguppi_read_directio_mode(header);
+
         // Adjust length for any padding required for DirectIO
         if(directio) {
             // Round up to next multiple of 512
@@ -192,13 +186,13 @@ static void *run(hashpipe_thread_args_t * args)
 	printf("Block size: %d, and  BLOCK_DATA_SIZE: %d \n", blocsize, BLOCK_DATA_SIZE);
 	printf("header size: %d, and  MAX_HDR_SIZE: %d \n", headersize, MAX_HDR_SIZE);
 	if(sim_flag == 0){
-	    //lseek(fdin, block_idx*BLOCK_DATA_SIZE, SEEK_CUR);
-	    read_blocsize = read_fully(fdin, ptr, blocsize);
+	    //read_blocsize = read_fully(fdin, ptr, blocsize);
+	    read_blocsize = read(fdin, ptr, blocsize);
 	    printf("Number of bytes read in read_fully(): %zd \n", read_blocsize);
 	    printf("First element of buffer: %d \n", ptr[0]);
         } else{
 	    memcpy(ptr, sim_data, N_INPUT);
-	    ptr += N_INPUT;
+	    //ptr += N_INPUT;
 	}
 
         // Mark block as full

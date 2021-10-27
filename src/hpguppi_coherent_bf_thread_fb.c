@@ -92,7 +92,7 @@ update_fb_hdrs_from_raw_hdr_cbf(fb_hdr_t fb_hdr, const char *p_rawhdr)
       - raw_hdr.obsbw*(raw_hdr.obsnchan-1)/(2*raw_hdr.obsnchan)
       - (N_TIME/2) * fb_hdr.foff
       ;//TODO + schan * raw_hdr.obsbw / raw_hdr.obsnchan; // Adjust for schan
-    fb_hdr.nchans = N_COARSE_FREQ * N_TIME;
+    fb_hdr.nchans = N_COARSE_FREQ;
     fb_hdr.tsamp = raw_hdr.tbin * N_TIME * 256*1024;
     // TODO az_start, za_start
 }
@@ -304,10 +304,10 @@ static void *run(hashpipe_thread_args_t * args)
 	    // Need to understand and appropriately modify these values if necessary
 	    // Default values for now
             fb_hdr.foff = obsbw;
-            fb_hdr.nchans = N_COARSE_FREQ * N_TIME;
+            fb_hdr.nchans = N_COARSE_FREQ;
             fb_hdr.fch1 = obsfreq;
             fb_hdr.nbeams =  64;
-            fb_hdr.tsamp = tbin * N_TIME * 256*1024;
+            fb_hdr.tsamp = tbin * N_TIME;
 
 
 /*
@@ -380,7 +380,7 @@ static void *run(hashpipe_thread_args_t * args)
 	    // gpu processing function here, I think...
 	    output_data = run_beamformer((signed char *)&db->block[curblock].data, tmp_coefficients);
 
-	    /* Set beamformer output (CUDA kernel before conversion to power) that is summing to zero before moving on to next block*/
+	    /* Set beamformer output (CUDA kernel before conversion to power), that is summing, to zero before moving on to next block*/
 	    set_to_zero();
 
 	    printf("First element of output data: %f\n", output_data[0]);
