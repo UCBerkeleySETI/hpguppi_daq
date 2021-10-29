@@ -375,6 +375,8 @@ static void *run(hashpipe_thread_args_t * args)
 
 	    /* Write filterbank header to output file */
             fb_fd_write_header(fdraw, &fb_hdr);
+	    
+	    printf("Before run_beamformer! \n");
 
             /* Write data */
 	    // gpu processing function here, I think...
