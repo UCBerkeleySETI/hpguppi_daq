@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <pthread.h>
+#include <time.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/types.h>
@@ -126,6 +127,9 @@ static void *run(hashpipe_thread_args_t * args)
     sim_data = (char *)simulate_data(); // Generate block of simulated data
     ssize_t read_blocsize;
 
+    float read_time = 0;
+    float time_taken_r = 0;
+
     while (run_threads()) {
         hashpipe_status_lock_safe(&st);
         hputs(st.buf, status_key, "waiting");
@@ -135,6 +139,7 @@ static void *run(hashpipe_thread_args_t * args)
         /* Wait for new block to be free, then clear it
          * if necessary and fill its header with new values.
          */
+	printf("while ((rv=hpguppi_input_databuf_wait_free(db, block_idx)) \n");
         while ((rv=hpguppi_input_databuf_wait_free(db, block_idx)) 
                 != HASHPIPE_OK) {
             if (rv==HASHPIPE_TIMEOUT) {
@@ -149,11 +154,11 @@ static void *run(hashpipe_thread_args_t * args)
             }
         }
 
+	printf("Before file open if{} \n");
         //Read raw files
         if (fdin == -1) { //no file opened
             sprintf(fname, "%s.%04d.raw", basefilename, filenum);
             printf("Opening first raw file '%s'\n", fname);
-
             fdin = open(fname, open_flags, 0644);
             if (fdin==-1) {
                 hashpipe_error(__FUNCTION__,"Error opening file.");
@@ -162,15 +167,18 @@ static void *run(hashpipe_thread_args_t * args)
         }
 
         //Handling header - size, output path, directio----------------
+	printf("int headersize= get_header_size(fdin, header_buf, MAX_HDR_SIZE); \n");
         int headersize= get_header_size(fdin, header_buf, MAX_HDR_SIZE);
         set_output_path(header_buf, outdir, MAX_HDR_SIZE);
 
+	printf("char *header = hpguppi_databuf_header(db, block_idx); \n");
         char *header = hpguppi_databuf_header(db, block_idx);
         hashpipe_status_lock_safe(&st);
         hputs(st.buf, status_key, "receiving");
         memcpy(header, &header_buf, headersize);
         hashpipe_status_unlock_safe(&st);
 
+	printf("directio = hpguppi_read_directio_mode(header); \n");
         directio = hpguppi_read_directio_mode(header);
 
         // Adjust length for any padding required for DirectIO
@@ -180,11 +188,17 @@ static void *run(hashpipe_thread_args_t * args)
         }
 
         //Read data--------------------------------------------------
+	printf(" \n");
+	// Start timing read
+        struct timespec tval_before, tval_after;
+        clock_gettime(CLOCK_MONOTONIC, &tval_before);
+
         ptr = hpguppi_databuf_data(db, block_idx);
         lseek(fdin, headersize-MAX_HDR_SIZE, SEEK_CUR);
         blocsize = get_block_size(header_buf, MAX_HDR_SIZE);
 	printf("Block size: %d, and  BLOCK_DATA_SIZE: %d \n", blocsize, BLOCK_DATA_SIZE);
 	printf("header size: %d, and  MAX_HDR_SIZE: %d \n", headersize, MAX_HDR_SIZE);
+
 	if(sim_flag == 0){
 	    //read_blocsize = read_fully(fdin, ptr, blocsize);
 	    read_blocsize = read(fdin, ptr, blocsize);
@@ -195,6 +209,14 @@ static void *run(hashpipe_thread_args_t * args)
 	    //ptr += N_INPUT;
 	}
 
+	// Stop timing read
+        clock_gettime(CLOCK_MONOTONIC, &tval_after);
+        time_taken_r = (float)(tval_after.tv_sec - tval_before.tv_sec)*1e6; // Time in seconds since epoch
+        time_taken_r = time_taken_r + (float)(tval_after.tv_nsec - tval_before.tv_nsec)*1e-6; // Time in nanoseconds since 'tv_sec - start and end'
+        read_time = time_taken_r;
+        printf("Time taken to read from RAW file = %f ms \n", read_time);
+
+	printf("hpguppi_input_databuf_set_filled(db, block_idx); \n");
         // Mark block as full
         hpguppi_input_databuf_set_filled(db, block_idx);
 

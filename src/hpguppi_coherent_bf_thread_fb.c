@@ -11,6 +11,8 @@
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <sys/time.h>
 #include <fcntl.h>
 #include <errno.h>
 
@@ -335,6 +337,12 @@ static void *run(hashpipe_thread_args_t * args)
   fb_hdr.nbits  = 32;
   fb_hdr.nifs   = 1;
 
+  // Timing variables
+  float bf_time = 0;
+  float write_time = 0;
+  float time_taken = 0;
+  float time_taken_w = 0;
+
   // Generate weights or coefficients (using simulate_coefficients() for now)
   float* tmp_coefficients = simulate_coefficients();
   // Register the array in pinned memory to speed HtoD mem copy
@@ -383,6 +391,7 @@ static void *run(hashpipe_thread_args_t * args)
 
     // If packet idx is NOT within start/stop range
     if(pktidx < pktstart || pktstop <= pktidx) {
+      printf("Before checking whether files are open \n");
       for(int b = 0; b < N_BEAM; b++){
 	// If file open, close it
 	if(fdraw[b] != -1) {
@@ -401,6 +410,7 @@ static void *run(hashpipe_thread_args_t * args)
 	  }
 	}
       }
+      printf("Before marking as free \n");
       /* Mark as free */
       hpguppi_input_databuf_set_free(db, curblock);
 
@@ -436,6 +446,7 @@ static void *run(hashpipe_thread_args_t * args)
 
       // Update filterbank headers based on raw params and Nts etc.
       // Possibly here
+      printf("update_fb_hdrs_from_raw_hdr_cbf(fb_hdr, ptr) \n");
       update_fb_hdrs_from_raw_hdr_cbf(fb_hdr, ptr);
 
       hgetr8(ptr, "OBSBW", &obsbw);
@@ -542,6 +553,7 @@ static void *run(hashpipe_thread_args_t * args)
       hashpipe_status_unlock_safe(st);
 
       /* Write filterbank header to output file */
+      printf("fb_fd_write_header(fdraw[b], &fb_hdr); \n");
       if(block_count == 0){
 	for(int b = 0; b < N_BEAM; b++){
 	  fb_hdr.ibeam =  b;
@@ -553,17 +565,34 @@ static void *run(hashpipe_thread_args_t * args)
 
       /* Write data */
       // gpu processing function here, I think...
+
+      // Start timing beamforming computation
+      struct timespec tval_before, tval_after;
+      clock_gettime(CLOCK_MONOTONIC, &tval_before);
+
       output_data = run_beamformer((signed char *)&db->block[curblock].data, tmp_coefficients);
 
       /* Set beamformer output (CUDA kernel before conversion to power), that is summing, to zero before moving on to next block*/
       set_to_zero();
 
+      // Stop timing beamforming computation
+      clock_gettime(CLOCK_MONOTONIC, &tval_after);
+      time_taken = (float)(tval_after.tv_sec - tval_before.tv_sec); //*1e6; // Time in seconds since epoch
+      time_taken = time_taken + (float)(tval_after.tv_nsec - tval_before.tv_nsec)*1e-9; // Time in nanoseconds since 'tv_sec - start and end'
+      bf_time = time_taken;
+
+      printf("run_beamformer() plus set_to_zero() time: %f s\n", bf_time);
+
       printf("First element of output data: %f\n", output_data[0]);
-      printf("Last non-zero element of output data: %f\n", output_data[8388317]);
-      printf("First zero element of output data: %f\n", output_data[8388318]);
-      printf("Random element after zeros start of output data: %f\n", output_data[8400000]);
-      printf("Last element of output data: %f\n", output_data[33554431]);
+      //printf("Last non-zero element of output data: %f\n", output_data[8388317]);
+      //printf("First zero element of output data: %f\n", output_data[8388318]);
+      //printf("Random element after zeros start of output data: %f\n", output_data[8400000]);
+      //printf("Last element of output data: %f\n", output_data[33554431]);
       //printf("Block size cast as size_t: %lu\n", (size_t)blocksize);
+
+      // Start timing write
+      struct timespec tval_before_w, tval_after_w;
+      clock_gettime(CLOCK_MONOTONIC, &tval_before_w);
 
       // This may be okay to write to filterbank files, but I'm not entirely confident
       for(int b = 0; b < N_BEAM; b++){
@@ -580,6 +609,14 @@ static void *run(hashpipe_thread_args_t * args)
 	/* flush output */
 	fsync(fdraw[b]);
       }
+
+      // Stop timing write
+      clock_gettime(CLOCK_MONOTONIC, &tval_after_w);
+      time_taken_w = (float)(tval_after_w.tv_sec - tval_before_w.tv_sec); //*1e6; // Time in seconds since epoch
+      time_taken_w = time_taken_w + (float)(tval_after_w.tv_nsec - tval_before_w.tv_nsec)*1e-9; // Time in nanoseconds since 'tv_sec - start and end'
+      write_time = time_taken_w;
+      printf("Time taken to write block to disk = %f s \n", write_time);
+      
       printf("After write() function! Block index = %d \n", block_count);
 
       /* Increment counter */
