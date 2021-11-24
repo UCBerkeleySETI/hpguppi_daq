@@ -4,7 +4,7 @@ To compile:
 ```
  $ cd src
  $ autoreconf -is
- $ ./configure --with-libsla=/usr/local/listen/lib --with-libcoherent_beamformer=/home/mruzinda/beamformer_workspace/lib
+ $ ./configure --with-libsla=/usr/local/listen/lib --with-libcoherent_beamformer=/home/mruzinda/beamformer_workspace/lib --with-libpython3.7m=/opt/conda/lib
  $ make
  ```
 

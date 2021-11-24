@@ -211,8 +211,8 @@ static void *run(hashpipe_thread_args_t * args)
 
 	// Stop timing read
         clock_gettime(CLOCK_MONOTONIC, &tval_after);
-        time_taken_r = (float)(tval_after.tv_sec - tval_before.tv_sec)*1e6; // Time in seconds since epoch
-        time_taken_r = time_taken_r + (float)(tval_after.tv_nsec - tval_before.tv_nsec)*1e-6; // Time in nanoseconds since 'tv_sec - start and end'
+        time_taken_r = (float)(tval_after.tv_sec - tval_before.tv_sec); //*1e6; // Time in seconds since epoch
+        time_taken_r = time_taken_r + (float)(tval_after.tv_nsec - tval_before.tv_nsec)*1e-9; //*1e-6; // Time in nanoseconds since 'tv_sec - start and end'
         read_time = time_taken_r;
         printf("Time taken to read from RAW file = %f ms \n", read_time);
 
