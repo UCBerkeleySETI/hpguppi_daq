@@ -3,7 +3,6 @@ AM_CPPFLAGS     =
 
 AM_CPPFLAGS += -I"@HASHPIPE_INCDIR@"
 AM_CPPFLAGS += -I"@CBF_INCDIR@"
-AM_CPPFLAGS += -I"@PY_INCDIR@" # For embedding katpoint and mosiac modules
 
 # AM_CFLAGS is used for all C compiles
 AM_CFLAGS = -ggdb -fPIC -O3 -Wall -Werror -Wno-error=cpp -fno-strict-aliasing @X86_FEATURE_CFLAGS@
@@ -50,12 +49,12 @@ hpguppi_threads = hpguppi_ibverbs_pkt_thread.c \
 lib_LTLIBRARIES = hpguppi_daq.la
 hpguppi_daq_la_SOURCES  = $(hpguppi_databuf) $(hpguppi_support) $(libsla_support) $(hpguppi_threads)
 #hpguppi_daq_la_LIBADD   = -lsla -lrt -lrawspec -lhashpipe_ibverbs -lcoherent_beamformer -lm -L/opt/conda/lib -lpython3.7m
-hpguppi_daq_la_LIBADD   = -lsla -lrt -lrawspec -lhashpipe_ibverbs -lcoherent_beamformer -lm -lpython3.7m
+#hpguppi_daq_la_LIBADD   = -lsla -lrt -lrawspec -lhashpipe_ibverbs -lcoherent_beamformer -lm -lpython3.7m
+hpguppi_daq_la_LIBADD   = -lsla -lrt -lrawspec -lhashpipe_ibverbs -lcoherent_beamformer -lm
 hpguppi_daq_la_LDFLAGS  = -avoid-version -module -shared -export-dynamic
 hpguppi_daq_la_LDFLAGS += -L"@LIBSLADIR@" -Wl,-rpath,"@LIBSLADIR@"
 hpguppi_daq_la_LDFLAGS += -L"@HASHPIPE_LIBDIR@" -Wl,-rpath,"@HASHPIPE_LIBDIR@"
 hpguppi_daq_la_LDFLAGS += -L"@CBF_LIBDIR@" -Wl,-rpath,"@CBF_LIBDIR@"
-hpguppi_daq_la_LDFLAGS += -L"@PY_LIBDIR@" -Wl,-rpath,"@PY_LIBDIR@"
 
 # Installed scripts
 dist_bin_SCRIPTS = hpguppi_gbtstatus_loop.rb \

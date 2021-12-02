@@ -34,8 +34,8 @@ AX_CHECK_RAWSPEC
 # Check for coherent beamformer
 AX_CHECK_CBF
 
-# Check for python3.7m
-AX_CHECK_PY
+# # Check for python3.7m
+#AX_CHECK_PY
 
 # Checks for libraries.
 #AC_CHECK_LIB([pthread], [pthread_create])
@@ -49,11 +49,11 @@ AC_ARG_WITH([libcoherent_beamformer],
             [LIBCBFDIR="$withval"],
             [LIBCBFDIR="."])
 
-AC_ARG_WITH([libpython3.7m],
-            AC_HELP_STRING([--with-libpython3.7m=DIR],
-                           [Location of python3.7 library]),
-            [LIBPYDIR="$withval"],
-            [LIBPYDIR="."])
+#AC_ARG_WITH([libpython3.7m],
+#            AC_HELP_STRING([--with-libpython3.7m=DIR],
+#                           [Location of python3.7 library]),
+#            [LIBPYDIR="$withval"],
+#            [LIBPYDIR="."])
 
 AC_ARG_WITH([libsla],
             AC_HELP_STRING([--with-libsla=DIR],
