@@ -47,44 +47,21 @@ static const char BACKEND_RECORD[] =
   "BACKEND = 'GUPPI   '                    " \
   "                                        ";
 
-//#ifndef DEBUG_RAWSPEC_CALLBACKS
-//#define DEBUG_RAWSPEC_CALLBACKS (0)
-//#endif
-/*
-static ssize_t write_all(int fd, const void *buf, size_t bytes_to_write)
-{
-  size_t bytes_remaining = bytes_to_write;
-  ssize_t bytes_written = 0;
-  while(bytes_remaining != 0) {
-    bytes_written = write(fd, buf, bytes_remaining);
-    if(bytes_written == -1) {
-      // Error!
-      return -1;
-    }
-    bytes_remaining -= bytes_written;
-    buf += bytes_written;
-  }
-  // All done!
-  return bytes_to_write;
-}
-*/
-
-static int safe_close(int *pfd) {
+static int safe_close_all(int *pfd) {
   if (pfd==NULL) return 0;
-  fsync(*pfd);
-  return close(*pfd);
+  int pfd_size = sizeof(pfd)/sizeof(int);
+  int fd_val = -1;
+  for(int i = 0; i < pfd_size; i++){
+     if(pfd[i] == -1){
+       fsync(pfd[i]);
+       fd_val = close(pfd[i]);
+       if(fd_val == -1){
+         printf("A file was not successfully closed! \n");
+       }
+     }
+  }
+  return 0;
 }
-
-//static int safe_close(int *pfd) {
-//  if (pfd==NULL) return 0;
-//  // Close all the files associated with each beam
-//  int pfd_size = sizeof(pfd)/sizeof(int);
-//  printf("Size of file descriptor array = %d \n", pfd_size);
-//  for(int i = 0; i < pfd_size; i++){
-//    fsync(pfd[i]);
-//    return close(pfd[i]);
-//  }
-//}
 
 void
 update_fb_hdrs_from_raw_hdr_cbf(fb_hdr_t fb_hdr, const char *p_rawhdr)
@@ -117,33 +94,6 @@ update_fb_hdrs_from_raw_hdr_cbf(fb_hdr_t fb_hdr, const char *p_rawhdr)
   // TODO az_start, za_start
 }
 
-#if 0
-static int init(hashpipe_thread_args_t * args)
-{
-    int i;
-    uint32_t Nc = 0;
-    uint32_t Nbps = 8;
-
-    hpguppi_input_databuf_t *db = (hpguppi_input_databuf_t *)args->ibuf;
-    hashpipe_status_t *st = &args->st;
-
-    hashpipe_status_lock_safe(st);
-    // Get Nc from OBSNCHAN
-    hgetu4(st->buf, "OBSNCHAN", &Nc);
-    // Get Nbps from NBITS
-    hgetu4(st->buf, "NBITS", &Nbps);
-    hashpipe_status_unlock_safe(st);
-
-    if(Nc == 0) {
-      hashpipe_error("hpguppi_rawdisk_thread",
-	  "OBSNCHAN not found in status buffer");
-      return HASHPIPE_ERR_PARAM;
-    }
-
-    return HASHPIPE_OK;
-}
-#endif // 0
-
 static void *run(hashpipe_thread_args_t * args)
 {
   // Local aliases to shorten access to args fields
@@ -163,161 +113,14 @@ static void *run(hashpipe_thread_args_t * args)
   pthread_cleanup_push((void *)hpguppi_free_psrfits, &pf);
 
   /* Init output file descriptor (-1 means no file open) */
-  //static int fdraw = -1;
-  //pthread_cleanup_push((void *)safe_close, &fdraw);
-
-  // The pthread_cleanup_push() and pop() are used for thread safety and have to be called within the same scope i.e. { ... }
-  // And all of the filterbank files associated with each beam must be closed upon termination of the threads
-  // So for now, thse initializations have to be hardcoded one by one :(
   static int fdraw[N_BEAM];
-  fdraw[0] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[0]);
-  fdraw[1] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[1]);
-  fdraw[2] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[2]);
-  fdraw[3] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[3]);
-  fdraw[4] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[4]);
-  fdraw[5] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[5]);
-  fdraw[6] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[6]);
-  fdraw[7] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[7]);
-  fdraw[8] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[8]);
-  fdraw[9] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[9]);
-  fdraw[10] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[10]);
-  fdraw[11] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[11]);
-  fdraw[12] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[12]);
-  fdraw[13] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[13]);
-  fdraw[14] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[14]);
-  fdraw[15] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[15]);
-  fdraw[16] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[16]);
-  fdraw[17] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[17]);
-  fdraw[18] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[18]);
-  fdraw[19] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[19]);
-  fdraw[20] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[20]);
-  fdraw[21] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[21]);
-  fdraw[22] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[22]);
-  fdraw[23] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[23]);
-  fdraw[24] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[24]);
-  fdraw[25] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[25]);
-  fdraw[26] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[26]);
-  fdraw[27] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[27]);
-  fdraw[28] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[28]);
-  fdraw[29] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[29]);
-  fdraw[30] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[30]);
-  fdraw[31] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[31]);
-  fdraw[32] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[32]);
-  fdraw[33] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[33]);
-  fdraw[34] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[34]);
-  fdraw[35] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[35]);
-  fdraw[36] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[36]);
-  fdraw[37] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[37]);
-  fdraw[38] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[38]);
-  fdraw[39] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[39]);
-  fdraw[40] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[40]);
-  fdraw[41] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[41]);
-  fdraw[42] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[42]);
-  fdraw[43] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[43]);
-  fdraw[44] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[44]);
-  fdraw[45] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[45]);
-  fdraw[46] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[46]);
-  fdraw[47] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[47]);
-  fdraw[48] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[48]);
-  fdraw[49] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[49]);
-  fdraw[50] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[50]);
-  fdraw[51] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[51]);
-  fdraw[52] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[52]);
-  fdraw[53] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[53]);
-  fdraw[54] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[54]);
-  fdraw[55] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[55]);
-  fdraw[56] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[56]);
-  fdraw[57] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[57]);
-  fdraw[58] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[58]);
-  fdraw[59] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[59]);
-  fdraw[60] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[60]);
-  fdraw[61] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[61]);
-  fdraw[62] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[62]);
-  fdraw[63] = -1;
-  pthread_cleanup_push((void *)safe_close, &fdraw[63]);
+  memset(fdraw, -1, N_BEAM*sizeof(int));
+  pthread_cleanup_push((void *)safe_close_all, fdraw);
 
   // Set I/O priority class for this thread to "real time" 
   if(ioprio_set(IOPRIO_WHO_PROCESS, 0, IOPRIO_PRIO_VALUE(IOPRIO_CLASS_RT, 7))) {
     hashpipe_error(thread_name, "ioprio_set IOPRIO_CLASS_RT");
   }
-
-  // ------------ Prefered way to do the above, but can't given the current setup ------------------ //
-  /*
-  for(int b = 0; b < N_BEAM; b++)
-    fdraw[b] = -1;
-
-  for(int b = 0; b < N_BEAM; b++)
-    pthread_cleanup_push((void *)safe_close, &fdraw[b]);
-
-  // Set I/O priority class for this thread to "real time" 
-  if(ioprio_set(IOPRIO_WHO_PROCESS, 0, IOPRIO_PRIO_VALUE(IOPRIO_CLASS_RT, 7))) {
-    hashpipe_error(thread_name, "ioprio_set IOPRIO_CLASS_RT");
-  }
-  */
-  // ---------------------------------------------------------------------------------------------- //
 
   /* Loop */
   int64_t pktidx=0, pktstart=0, pktstop=0;
@@ -350,11 +153,53 @@ static void *run(hashpipe_thread_args_t * args)
   float time_taken = 0;
   float time_taken_w = 0;
 
-/*
-  // --------------------- Calculate delays with katpoint and mosaic --------------------------------//
-  
+
+  // --------------------- Initial delay calculations with katpoint and mosaic --------------------------------//
+  // Or all calculations may be done in the while loop below
+  // File descriptor
+  int fd1;
+
+  // Array of floats to place data read from file
+  float delay_pols[N_DELAYS];
+
+  // FIFO file path
+  char * myfifo = "/tmp/katpoint_delays";
+
+  // Creating the named file(FIFO)
+  // mkfifo(<pathname>,<permission>)
+  mkfifo(myfifo, 0666);
+
+  // Open file as a read only
+  fd1 = open(myfifo,O_RDONLY);
+
+  // Read file
+  int read_val = read(fd1, delay_pols, sizeof(delay_pols));
+  if(read_val != 0){
+    printf("Error: No file read!\n");
+  }
+
+  // Close file
+  close(fd1);
+
+  printf("Size of delay array %lu\n", sizeof(delay_pols));
+
+  // First beam
+  printf("--------------First beam delay offset---------------\n");
+  printf("idx %lu in result array = %e \n", delay_idx(0, 0, 0), delay_pols[delay_idx(0, 0, 0)]);
+  printf("idx %lu in result array = %e \n", delay_idx(0, 1, 0), delay_pols[delay_idx(0, 1, 0)]);
+  printf("idx %lu in result array = %e \n", delay_idx(0, 2, 0), delay_pols[delay_idx(0, 2, 0)]);
+  // Second beam delay
+  printf("--------------Second beam delay offset--------------\n");
+  printf("idx %lu in result array = %e \n", delay_idx(0, 0, 1), delay_pols[delay_idx(0, 0, 1)]);
+  printf("idx %lu in result array = %e \n", delay_idx(0, 1, 1), delay_pols[delay_idx(0, 1, 1)]);
+  printf("idx %lu in result array = %e \n", delay_idx(0, 2, 1), delay_pols[delay_idx(0, 2, 1)]);
+  // Second beam rate
+  printf("---------------Second beam delay rate----------------\n");
+  printf("idx %lu in result array = %e \n", delay_idx(1, 0, 1), delay_pols[delay_idx(1, 0, 1)]); // 129
+  printf("idx %lu in result array = %e \n", delay_idx(1, 1, 1), delay_pols[delay_idx(1, 1, 1)]); // 131
+  printf("idx %lu in result array = %e \n", delay_idx(1, 2, 1), delay_pols[delay_idx(1, 2, 1)]); // 133
   // ------------------------------------------------------------------------------------------------//
-*/
+
 
   // Add if statement for generate_coefficients() function option which has 3 arguments - tau, coarse frequency channel, and epoch
   // Generate weights or coefficients (using simulate_coefficients() for now)
@@ -469,7 +314,11 @@ static void *run(hashpipe_thread_args_t * args)
 
       // Open N_BEAM filterbank files to save a beam per file i.e. N_BIN*N_TIME*sizeof(float) per file.
       for(int b = 0; b < N_BEAM; b++){
-	sprintf(fname, "%s.%04d-cbf%d.fil", pf.basefilename, filenum, b);
+        if(b >= 0 && b < 10) {
+	  sprintf(fname, "%s.%04d-cbf0%d.fil", pf.basefilename, filenum, b);
+        }else{
+          sprintf(fname, "%s.%04d-cbf%d.fil", pf.basefilename, filenum, b);
+        }
         hashpipe_info(thread_name, "Opening fil file '%s'", fname);
 	  last_slash = strrchr(fname, '/');
         if(last_slash) {
@@ -500,38 +349,6 @@ static void *run(hashpipe_thread_args_t * args)
       fb_hdr.fch1 = obsfreq;
       fb_hdr.nbeams = N_BEAM;
       fb_hdr.tsamp = tbin * N_TIME;
-
-
-/*
-      hpguppi_read_obs_params(ptr, &gp, &pf);
-      directio = hpguppi_read_directio_mode(ptr);
-      char fname[256];
-      sprintf(fname, "%s.%04d.raw", pf.basefilename, filenum);
-      fprintf(stderr, "Opening first raw file '%s' (directio=%d)\n", fname, directio);
-      // Create the output directory if needed
-      char datadir[1024];
-      strncpy(datadir, pf.basefilename, 1023);
-      char *last_slash = strrchr(datadir, '/');
-      if (last_slash!=NULL && last_slash!=datadir) {
-	*last_slash = '\0';
-        printf("Using directory '%s' for output.\n", datadir);
-	if(mkdir_p(datadir, 0755) == -1) {
-	  hashpipe_error(thread_name, "mkdir_p(%s)", datadir);
-	  break;
-	}
-      }
-      // TODO: check for file exist.
-      open_flags = O_CREAT|O_RDWR|O_SYNC;
-      if(directio) {
-	open_flags |= O_DIRECT;
-      }
-      fdraw = open(fname, open_flags, 0644);
-      if (fdraw==-1) {
-	hashpipe_error(thread_name, "Error opening file.");
-	pthread_exit(NULL);
-      }
-*/
-
     }
 
     /* See if we need to open next file */
@@ -540,7 +357,11 @@ static void *run(hashpipe_thread_args_t * args)
       char fname[256];
       for(int b = 0; b < N_BEAM; b++){
 	close(fdraw[b]);
-	sprintf(fname, "%s.%04d-cbf%d.fil", pf.basefilename, filenum, b);
+        if(b >= 0 && b < 10) {
+	  sprintf(fname, "%s.%04d-cbf0%d.fil", pf.basefilename, filenum, b);
+        }else{
+          sprintf(fname, "%s.%04d-cbf%d.fil", pf.basefilename, filenum, b);
+        }
 	open_flags = O_CREAT|O_RDWR|O_SYNC;
         fprintf(stderr, "Opening next fil file '%s'\n", fname);
         fdraw[b] = open(fname, open_flags, 0644);
@@ -551,12 +372,6 @@ static void *run(hashpipe_thread_args_t * args)
       }
       block_count=0;
     }
-
-    /* See how full databuf is */
-    //total_status = hpguppi_input_databuf_total_status(db);
-
-    /* Get full data block size */
-    //hgeti4(ptr, "BLOCSIZE", &blocksize);
 
     /* If we got packet 0, process and write data to disk */
     if (got_packet_0) {
@@ -598,11 +413,6 @@ static void *run(hashpipe_thread_args_t * args)
       printf("run_beamformer() plus set_to_zero() time: %f s\n", bf_time);
 
       printf("First element of output data: %f\n", output_data[0]);
-      //printf("Last non-zero element of output data: %f\n", output_data[8388317]);
-      //printf("First zero element of output data: %f\n", output_data[8388318]);
-      //printf("Random element after zeros start of output data: %f\n", output_data[8400000]);
-      //printf("Last element of output data: %f\n", output_data[33554431]);
-      //printf("Block size cast as size_t: %lu\n", (size_t)blocksize);
 
       // Start timing write
       struct timespec tval_before_w, tval_after_w;
@@ -610,12 +420,10 @@ static void *run(hashpipe_thread_args_t * args)
 
       // This may be okay to write to filterbank files, but I'm not entirely confident
       for(int b = 0; b < N_BEAM; b++){
-	//rv = write_all(fdraw[b], &output_data[b*N_TIME*N_FREQ], (size_t)blocksize);
 	rv = write(fdraw[b], &output_data[b*N_TIME*N_FREQ], (size_t)blocksize);
 	if(rv != blocksize){
 	  char msg[100];
           perror(thread_name);
-          //sprintf(msg, "Error writing data (ptr=%p, blocksize=%d, rv=%d)", ptr, blocksize, rv);
 	  sprintf(msg, "Error writing data (output_data=%p, blocksize=%d, rv=%d)", output_data, blocksize, rv);
           hashpipe_error(thread_name, msg);
         }
@@ -648,86 +456,15 @@ static void *run(hashpipe_thread_args_t * args)
 
   }
 
+  pthread_cleanup_pop(0); // Closes safe_close 
+
+  pthread_cleanup_pop(0); /* Closes hpguppi_free_psrfits */
+
   // Free up device memory
   cohbfCleanup();
 
   hashpipe_info(thread_name, "exiting!");
   pthread_exit(NULL);
-
-  // ------------ Prefered way to do the below calls, but can't given the current setup ------------------ //
-  /*
-  for(int b = 0; b < N_BEAM; b++)
-    pthread_cleanup_pop(0); // Closes safe_close
-  */
-  // ---------------------------------------------------------------------------------------------------- //
-
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-  pthread_cleanup_pop(0); // Closes safe_close 
-
-  pthread_cleanup_pop(0); /* Closes hpguppi_free_psrfits */
-
 }
 
 static hashpipe_thread_desc_t rawdisk_thread = {
