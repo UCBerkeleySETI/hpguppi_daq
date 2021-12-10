@@ -175,7 +175,7 @@ static void *run(hashpipe_thread_args_t * args)
   // Read file
   int read_val = read(fd1, delay_pols, sizeof(delay_pols));
   if(read_val != 0){
-    printf("Error: No file read!\n");
+    printf("\n");
   }
 
   // Close file
@@ -200,6 +200,7 @@ static void *run(hashpipe_thread_args_t * args)
   printf("idx %lu in result array = %e \n", delay_idx(1, 2, 1), delay_pols[delay_idx(1, 2, 1)]); // 133
   // ------------------------------------------------------------------------------------------------//
 
+  uint64_t synctime = 0;
 
   // Add if statement for generate_coefficients() function option which has 3 arguments - tau, coarse frequency channel, and epoch
   // Generate weights or coefficients (using simulate_coefficients() for now)
@@ -228,7 +229,10 @@ static void *run(hashpipe_thread_args_t * args)
     /* Note waiting status */
     hashpipe_status_lock_safe(st);
     hputs(st->buf, status_key, "waiting");
+    hgetu8(st->buf, "SYNCTIME", &synctime);
     hashpipe_status_unlock_safe(st);
+
+    printf("Sync time: %lu\n", synctime);
 
     /* Wait for buf to have data */
     rv = hpguppi_input_databuf_wait_filled(db, curblock);
@@ -389,9 +393,13 @@ static void *run(hashpipe_thread_args_t * args)
 	  fb_fd_write_header(fdraw[b], &fb_hdr);
 	}
       }
-	    
-      printf("Before run_beamformer! \n");
 
+      /* Periodically get delay polynomials */
+      // First check to see whether the file in /tmp used as a FIFO exists, currently called katpoint_delays
+      // If it exists, read the delays from the FIFO then compute new beamformer coefficients
+      // If it doesn't exist then that means no new delays have been calculated so continue on with the previously calculated delays.
+
+      printf("Before run_beamformer! \n");
       /* Write data */
       // gpu processing function here, I think...
 

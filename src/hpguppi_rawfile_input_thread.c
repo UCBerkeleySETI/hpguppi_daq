@@ -77,6 +77,23 @@ void set_output_path(char * header_buf, char * outdir, size_t len)
     }
 }
 
+uint64_t get_synctime(char * header_buf, size_t len)
+{
+    int i;
+    char s_str[32];
+    uint64_t synctime = 0;
+    //Read header loop over the 80-byte records
+    for (i=0; i<len; i += 80) {
+        if(!strncmp(header_buf+i, "SYNCTIME", 8)) {
+            strncpy(s_str,header_buf+i+16, 32);
+            synctime = strtoul(s_str,NULL,0);
+            printf("rawfile_input_thread: synctime = %lu\n",synctime);
+            break;
+        }
+    }
+    return synctime;
+}
+
 ssize_t read_fully(int fd, void * buf, size_t bytes_to_read)
 {
     ssize_t bytes_read;
@@ -130,6 +147,8 @@ static void *run(hashpipe_thread_args_t * args)
     float read_time = 0;
     float time_taken_r = 0;
 
+    uint64_t synctime = 0;
+
     while (run_threads()) {
         hashpipe_status_lock_safe(&st);
         hputs(st.buf, status_key, "waiting");
@@ -170,6 +189,12 @@ static void *run(hashpipe_thread_args_t * args)
 	printf("int headersize= get_header_size(fdin, header_buf, MAX_HDR_SIZE); \n");
         int headersize= get_header_size(fdin, header_buf, MAX_HDR_SIZE);
         set_output_path(header_buf, outdir, MAX_HDR_SIZE);
+
+        // Get synctime from GUPPI RAW file and place value in shared memory
+        synctime = get_synctime(header_buf, MAX_HDR_SIZE);
+        hashpipe_status_lock_safe(&st);
+        hputu8(st.buf, "SYNCTIME", synctime);
+        hashpipe_status_unlock_safe(&st);
 
 	printf("char *header = hpguppi_databuf_header(db, block_idx); \n");
         char *header = hpguppi_databuf_header(db, block_idx);
