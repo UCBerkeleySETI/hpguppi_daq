@@ -6,6 +6,7 @@
 #define _GNU_SOURCE 1
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include <assert.h>
 #include <stdint.h>
@@ -159,6 +160,9 @@ static void *run(hashpipe_thread_args_t * args)
   // File descriptor
   int fd1;
 
+  // Return value of read() function
+  int read_val;
+
   // Array of floats to place data read from file
   float delay_pols[N_DELAYS];
 
@@ -173,7 +177,7 @@ static void *run(hashpipe_thread_args_t * args)
   fd1 = open(myfifo,O_RDONLY);
 
   // Read file
-  int read_val = read(fd1, delay_pols, sizeof(delay_pols));
+  read_val = read(fd1, delay_pols, sizeof(delay_pols));
   if(read_val != 0){
     printf("\n");
   }
@@ -200,13 +204,31 @@ static void *run(hashpipe_thread_args_t * args)
   printf("idx %lu in result array = %e \n", delay_idx(1, 2, 1), delay_pols[delay_idx(1, 2, 1)]); // 133
   // ------------------------------------------------------------------------------------------------//
 
+  
   uint64_t synctime = 0;
+  uint64_t hclocks = 1;
+  uint32_t fenchan = 1;
+  double chan_bw = 1.0;
+  double realtime_secs = 0.0; // Epoch used for delay polynomial
+  int n_update_blks = 3; // Number of blocks to update coefficients with new epoch
 
+  float* bf_coefficients; // Beamformer coefficients
+  float* tmp_coefficients; // Temporary coefficients
+
+  int sim_flag = 0; // Flag to use simulated coefficients (set to 1) or calculated beamformer coefficients (set to 0)
   // Add if statement for generate_coefficients() function option which has 3 arguments - tau, coarse frequency channel, and epoch
-  // Generate weights or coefficients (using simulate_coefficients() for now)
-  float* tmp_coefficients = simulate_coefficients();
-  // Register the array in pinned memory to speed HtoD mem copy
-  coeff_pin(tmp_coefficients);
+  if(sim_flag == 1){
+    // Generate weights or coefficients (using simulate_coefficients() for now)
+    tmp_coefficients = simulate_coefficients();
+    // Register the array in pinned memory to speed HtoD mem copy
+    coeff_pin(tmp_coefficients);
+  }
+  if(sim_flag == 0){
+    bf_coefficients = (float*)calloc(N_COEFF, sizeof(float)); // Beamformer coefficients
+    coeff_pin(bf_coefficients);
+  }
+
+  // -----------------Get phase solutions----------------- //
 
   // Make all initializations before while loop
   // Initialize beamformer (allocate all memory on the device)
@@ -229,10 +251,7 @@ static void *run(hashpipe_thread_args_t * args)
     /* Note waiting status */
     hashpipe_status_lock_safe(st);
     hputs(st->buf, status_key, "waiting");
-    hgetu8(st->buf, "SYNCTIME", &synctime);
     hashpipe_status_unlock_safe(st);
-
-    printf("Sync time: %lu\n", synctime);
 
     /* Wait for buf to have data */
     rv = hpguppi_input_databuf_wait_filled(db, curblock);
@@ -251,6 +270,67 @@ static void *run(hashpipe_thread_args_t * args)
     hgeti8(ptr, "PKTIDX", &pktidx);
     hgeti8(ptr, "PKTSTART", &pktstart);
     hgeti8(ptr, "PKTSTOP", &pktstop);
+
+    hgetr8(ptr,"OBSFREQ", &obsfreq);
+
+    if(sim_flag == 0){
+      // Update coefficients every specified number of blocks
+      if(block_count%n_update_blks == 0){
+        //hashpipe_status_lock_safe(st);
+        hgetu8(ptr, "SYNCTIME", &synctime);
+        hgetu8(ptr, "HCLOCKS", &hclocks);
+        hgetu4(ptr, "FENCHAN", &fenchan);
+        hgetr8(ptr, "CHAN_BW", &chan_bw);
+        //hashpipe_status_unlock_safe(st);
+
+        printf("synctime: %lu\n", synctime);
+        printf("hclocks: %lu\n", hclocks);
+        printf("fenchan: %lu\n", (unsigned long)fenchan);
+        printf("chan_bw: %lf\n", chan_bw);
+        printf("pktidx: %ld\n", pktidx);
+        printf("obsfreq (MHz): %lf\n", obsfreq);
+
+        // Calc real-time seconds since SYNCTIME for pktidx:
+        //
+        //                        pktidx * hclocks
+        //     realtime_secs = -----------------------
+        //                      2e6 * fenchan * chan_bw
+        // This is the value that will be used in the delay polynomial (t, the epoch)
+        if(fenchan * chan_bw != 0.0) {
+          realtime_secs = (pktidx * hclocks) / (2e6 * fenchan * fabs(chan_bw));
+        }
+
+        // Update coefficients with realtime_secs
+        tmp_coefficients = generate_coefficients(delay_pols, obsfreq, realtime_secs);
+        memcpy(bf_coefficients, tmp_coefficients, N_COEFF*sizeof(float));
+      }
+
+      /* Periodically get delay polynomials */
+      // First check to see whether the file in /tmp used as a FIFO exists, currently called katpoint_delays
+      // If it exists, read the delays from the FIFO then compute new beamformer coefficients -> if( access( fname, F_OK ) == 0 )
+      // If it doesn't exist then that means no new delays have been calculated so continue on with the previously calculated delays.
+      if(access(myfifo, F_OK) == 0){
+        // Creating the named file(FIFO)
+        // mkfifo(<pathname>,<permission>)
+        mkfifo(myfifo, 0666);
+
+        // Open file as a read only
+        fd1 = open(myfifo,O_RDONLY);
+
+        // Read file
+        read_val = read(fd1, delay_pols, sizeof(delay_pols));
+        if(read_val != 0){
+          printf("\n");
+        }
+
+        // Close file
+        close(fd1);
+
+        // Update coefficients with delay polynomials
+        tmp_coefficients = generate_coefficients(delay_pols, obsfreq, realtime_secs);
+        memcpy(bf_coefficients, tmp_coefficients, N_COEFF*sizeof(float));
+      }
+    }
 
     // If packet idx is NOT within start/stop range
     if(pktidx < pktstart || pktstop <= pktidx) {
@@ -314,7 +394,7 @@ static void *run(hashpipe_thread_args_t * args)
 
       hgetr8(ptr, "OBSBW", &obsbw);
       hgetr8(ptr,"TBIN", &tbin);
-      hgetr8(ptr,"OBSFREQ", &obsfreq);
+      
 
       // Open N_BEAM filterbank files to save a beam per file i.e. N_BIN*N_TIME*sizeof(float) per file.
       for(int b = 0; b < N_BEAM; b++){
@@ -394,11 +474,6 @@ static void *run(hashpipe_thread_args_t * args)
 	}
       }
 
-      /* Periodically get delay polynomials */
-      // First check to see whether the file in /tmp used as a FIFO exists, currently called katpoint_delays
-      // If it exists, read the delays from the FIFO then compute new beamformer coefficients
-      // If it doesn't exist then that means no new delays have been calculated so continue on with the previously calculated delays.
-
       printf("Before run_beamformer! \n");
       /* Write data */
       // gpu processing function here, I think...
@@ -407,7 +482,12 @@ static void *run(hashpipe_thread_args_t * args)
       struct timespec tval_before, tval_after;
       clock_gettime(CLOCK_MONOTONIC, &tval_before);
 
-      output_data = run_beamformer((signed char *)&db->block[curblock].data, tmp_coefficients);
+      if(sim_flag == 1){
+        output_data = run_beamformer((signed char *)&db->block[curblock].data, tmp_coefficients);
+      }
+      if(sim_flag == 0){
+        output_data = run_beamformer((signed char *)&db->block[curblock].data, bf_coefficients);
+      }
 
       /* Set beamformer output (CUDA kernel before conversion to power), that is summing, to zero before moving on to next block*/
       set_to_zero();
