@@ -123,11 +123,13 @@ static void *run(hashpipe_thread_args_t * args)
     hashpipe_error(thread_name, "ioprio_set IOPRIO_CLASS_RT");
   }
 
+  printf("CBF: After ioprio_set...\n");
+
   /* Loop */
   int64_t pktidx=0, pktstart=0, pktstop=0;
   int blocksize=(N_BF_POW/N_BEAM)*sizeof(float); // Size of beamformer output
   int curblock=0;
-  int block_count=0, blocks_per_file=128, filenum=0;
+  int block_count=0, blocks_per_file=128, filenum=0, next_filenum=0;
   int got_packet_0=0, first=1;
   char *ptr;
   int open_flags = 0;
@@ -158,50 +160,66 @@ static void *run(hashpipe_thread_args_t * args)
   // --------------------- Initial delay calculations with katpoint and mosaic --------------------------------//
   // Or all calculations may be done in the while loop below
   // File descriptor
-  int fd1;
+  int fdr;
+  int fdw;
 
   // Return value of read() function
   int read_val;
 
+  // Return value of write() function
+  int write_val;
+
   // Array of floats to place data read from file
   float delay_pols[N_DELAYS];
+  
+  printf("CBF: After variable and pointer initializations ...\n");
 
   // FIFO file path
   char * myfifo = "/tmp/katpoint_delays";
+  char * myfifo1= "/tmp/epoch";
 
   // Creating the named file(FIFO)
   // mkfifo(<pathname>,<permission>)
-  mkfifo(myfifo, 0666);
+  //mkfifo(myfifo, 0666);
+  
 
+  printf("CBF: After mkfifos...\n");
+
+/*
   // Open file as a read only
-  fd1 = open(myfifo,O_RDONLY);
+  fdr = open(myfifo,O_RDONLY);
+
+  printf("CBF: After first open(myfifo)...\n");
 
   // Read file
-  read_val = read(fd1, delay_pols, sizeof(delay_pols));
+  read_val = read(fdr, delay_pols, sizeof(delay_pols));
   if(read_val != 0){
     printf("\n");
   }
 
+  printf("CBF: After first read()...\n");
+
   // Close file
-  close(fd1);
+  close(fdr);
 
   printf("Size of delay array %lu\n", sizeof(delay_pols));
 
   // First beam
   printf("--------------First beam delay offset---------------\n");
-  printf("idx %lu in result array = %e \n", delay_idx(0, 0, 0), delay_pols[delay_idx(0, 0, 0)]);
-  printf("idx %lu in result array = %e \n", delay_idx(0, 1, 0), delay_pols[delay_idx(0, 1, 0)]);
-  printf("idx %lu in result array = %e \n", delay_idx(0, 2, 0), delay_pols[delay_idx(0, 2, 0)]);
+  printf("CBF: idx %lu in result array = %e \n", delay_idx(0, 0, 0), delay_pols[delay_idx(0, 0, 0)]);
+  printf("CBF: idx %lu in result array = %e \n", delay_idx(0, 1, 0), delay_pols[delay_idx(0, 1, 0)]);
+  printf("CBF: idx %lu in result array = %e \n", delay_idx(0, 2, 0), delay_pols[delay_idx(0, 2, 0)]);
   // Second beam delay
   printf("--------------Second beam delay offset--------------\n");
-  printf("idx %lu in result array = %e \n", delay_idx(0, 0, 1), delay_pols[delay_idx(0, 0, 1)]);
-  printf("idx %lu in result array = %e \n", delay_idx(0, 1, 1), delay_pols[delay_idx(0, 1, 1)]);
-  printf("idx %lu in result array = %e \n", delay_idx(0, 2, 1), delay_pols[delay_idx(0, 2, 1)]);
+  printf("CBF: idx %lu in result array = %e \n", delay_idx(0, 0, 1), delay_pols[delay_idx(0, 0, 1)]);
+  printf("CBF: idx %lu in result array = %e \n", delay_idx(0, 1, 1), delay_pols[delay_idx(0, 1, 1)]);
+  printf("CBF: idx %lu in result array = %e \n", delay_idx(0, 2, 1), delay_pols[delay_idx(0, 2, 1)]);
   // Second beam rate
   printf("---------------Second beam delay rate----------------\n");
-  printf("idx %lu in result array = %e \n", delay_idx(1, 0, 1), delay_pols[delay_idx(1, 0, 1)]); // 129
-  printf("idx %lu in result array = %e \n", delay_idx(1, 1, 1), delay_pols[delay_idx(1, 1, 1)]); // 131
-  printf("idx %lu in result array = %e \n", delay_idx(1, 2, 1), delay_pols[delay_idx(1, 2, 1)]); // 133
+  printf("CBF: idx %lu in result array = %e \n", delay_idx(1, 0, 1), delay_pols[delay_idx(1, 0, 1)]); // 129
+  printf("CBF: idx %lu in result array = %e \n", delay_idx(1, 1, 1), delay_pols[delay_idx(1, 1, 1)]); // 131
+  printf("CBF: idx %lu in result array = %e \n", delay_idx(1, 2, 1), delay_pols[delay_idx(1, 2, 1)]); // 133
+*/
   // ------------------------------------------------------------------------------------------------//
 
   
@@ -209,7 +227,8 @@ static void *run(hashpipe_thread_args_t * args)
   uint64_t hclocks = 1;
   uint32_t fenchan = 1;
   double chan_bw = 1.0;
-  double realtime_secs = 0.0; // Epoch used for delay polynomial
+  double realtime_secs = 0.0; // Real-time in seconds according to the RAW file metadata
+  double epoch_sec = 0.0; // Epoch used for delay polynomial
   int n_update_blks = 3; // Number of blocks to update coefficients with new epoch
 
   float* bf_coefficients; // Beamformer coefficients
@@ -232,13 +251,13 @@ static void *run(hashpipe_thread_args_t * args)
 
   // Make all initializations before while loop
   // Initialize beamformer (allocate all memory on the device)
-  printf("Initializing beamformer...\n");
+  printf("CBF: Initializing beamformer...\n");
   init_beamformer();
 
   // Initialize output data array
   float* output_data;
 
-  printf("Using host arrays allocated in pinned memory\n\r");
+  printf("CBF: Using host arrays allocated in pinned memory\n\r");
   for (int i = 0; i < N_INPUT_BLOCKS; i++){
     ///////////////////////////////////////////////////////////////////////////////
     //>>>>   Register host array in pinned memory <<<<
@@ -271,24 +290,25 @@ static void *run(hashpipe_thread_args_t * args)
     hgeti8(ptr, "PKTSTART", &pktstart);
     hgeti8(ptr, "PKTSTOP", &pktstop);
 
-    hgetr8(ptr,"OBSFREQ", &obsfreq);
+    if(filenum == next_filenum){
+      next_filenum++;
+      hgetu8(ptr, "SYNCTIME", &synctime);
+      hgetu8(ptr, "HCLOCKS", &hclocks);
+      hgetu4(ptr, "FENCHAN", &fenchan);
+      hgetr8(ptr, "CHAN_BW", &chan_bw);
+      hgetr8(ptr, "OBSFREQ", &obsfreq);
+    }
 
     if(sim_flag == 0){
       // Update coefficients every specified number of blocks
       if(block_count%n_update_blks == 0){
-        //hashpipe_status_lock_safe(st);
-        hgetu8(ptr, "SYNCTIME", &synctime);
-        hgetu8(ptr, "HCLOCKS", &hclocks);
-        hgetu4(ptr, "FENCHAN", &fenchan);
-        hgetr8(ptr, "CHAN_BW", &chan_bw);
-        //hashpipe_status_unlock_safe(st);
 
-        printf("synctime: %lu\n", synctime);
-        printf("hclocks: %lu\n", hclocks);
-        printf("fenchan: %lu\n", (unsigned long)fenchan);
-        printf("chan_bw: %lf\n", chan_bw);
-        printf("pktidx: %ld\n", pktidx);
-        printf("obsfreq (MHz): %lf\n", obsfreq);
+        printf("CBF: synctime: %lu\n", synctime);
+        printf("CBF: hclocks: %lu\n", hclocks);
+        printf("CBF: fenchan: %lu\n", (unsigned long)fenchan);
+        printf("CBF: chan_bw: %lf\n", chan_bw);
+        printf("CBF: pktidx: %ld\n", pktidx);
+        printf("CBF: obsfreq (MHz): %lf\n", obsfreq);
 
         // Calc real-time seconds since SYNCTIME for pktidx:
         //
@@ -300,41 +320,76 @@ static void *run(hashpipe_thread_args_t * args)
           realtime_secs = (pktidx * hclocks) / (2e6 * fenchan * fabs(chan_bw));
         }
 
-        // Update coefficients with realtime_secs
-        tmp_coefficients = generate_coefficients(delay_pols, obsfreq, realtime_secs);
-        memcpy(bf_coefficients, tmp_coefficients, N_COEFF*sizeof(float));
-      }
+        epoch_sec = synctime + rint(realtime_secs);
 
-      /* Periodically get delay polynomials */
-      // First check to see whether the file in /tmp used as a FIFO exists, currently called katpoint_delays
-      // If it exists, read the delays from the FIFO then compute new beamformer coefficients -> if( access( fname, F_OK ) == 0 )
-      // If it doesn't exist then that means no new delays have been calculated so continue on with the previously calculated delays.
-      if(access(myfifo, F_OK) == 0){
+        printf("CBF: Before open(myfifo1), epoch_sec = %lf...\n", epoch_sec);
+  
+        // Write to new FIFO going to get_delays module for delay polynomial calculation
         // Creating the named file(FIFO)
         // mkfifo(<pathname>,<permission>)
-        mkfifo(myfifo, 0666);
-
-        // Open file as a read only
-        fd1 = open(myfifo,O_RDONLY);
-
-        // Read file
-        read_val = read(fd1, delay_pols, sizeof(delay_pols));
-        if(read_val != 0){
-          printf("\n");
+        mkfifo(myfifo1, 0666);
+        // Open file as a read/write
+        fdw = open(myfifo1,O_RDWR);
+        if(fdw == -1){
+          printf("CBF: Unable to open fifo1 file...\n");
         }
 
-        // Close file
-        close(fd1);
+        printf("CBF: After open(myfifo1)...\n");
 
-        // Update coefficients with delay polynomials
-        tmp_coefficients = generate_coefficients(delay_pols, obsfreq, realtime_secs);
-        memcpy(bf_coefficients, tmp_coefficients, N_COEFF*sizeof(float));
+        // Write to file
+        write_val = write(fdw, &epoch_sec, sizeof(epoch_sec));
+        if(write_val != sizeof(epoch_sec)){
+          printf("CBF: Error writing to FIFO!\n");
+        }
+
+        printf("CBF: After write(myfifo1)...\n");
+
+        // Close file
+        close(fdw);
+
+        //if(remove(myfifo1) == 0){
+        //  printf("CBF: Successfully deleted epoch_sec FIFO\n");
+        //}
+
+        // Now get the newly calculated polynomials from FIFO written to by get_delays module
+        /* Periodically get delay polynomials */
+        // First check to see whether the file in /tmp used as a FIFO exists, currently called katpoint_delays
+        // If it exists, read the delays from the FIFO then compute new beamformer coefficients -> if( access( fname, F_OK ) == 0 )
+        // If it doesn't exist then that means no new delays have been calculated so continue on with the previously calculated delays.
+        if(access(myfifo, F_OK) == 0){
+          // Creating the named file(FIFO)
+          // mkfifo(<pathname>,<permission>)
+          //mkfifo(myfifo, 0666);
+
+          // Open file as a read only
+          printf("CBF: Before open(myfifo)...\n");
+          fdr = open(myfifo,O_RDWR);
+          if(fdr == -1){
+            printf("CBF: Unable to open fifo1 file...\n");
+          }
+
+          printf("CBF: After open(myfifo)...\n");
+
+          // Read file
+          read_val = read(fdr, delay_pols, sizeof(delay_pols));
+          if(read_val != 0){
+            printf("\n");
+          }
+          printf("CBF: After delay read()...\n");
+
+          // Close file
+          close(fdr);
+        }
       }
+      // Update coefficients with realtime_secs
+      // Assign values to tmp variable then copy values from it to pinned memory pointer (bf_coefficients)
+      tmp_coefficients = generate_coefficients(delay_pols, obsfreq, epoch_sec);
+      memcpy(bf_coefficients, tmp_coefficients, N_COEFF*sizeof(float));
     }
 
     // If packet idx is NOT within start/stop range
     if(pktidx < pktstart || pktstop <= pktidx) {
-      printf("Before checking whether files are open \n");
+      printf("CBF: Before checking whether files are open \n");
       for(int b = 0; b < N_BEAM; b++){
 	// If file open, close it
 	if(fdraw[b] != -1) {
@@ -344,7 +399,7 @@ static void *run(hashpipe_thread_args_t * args)
 	  fdraw[b] = -1;
 	  if(b == 0){ // These variables only need to be set to zero once
 	    got_packet_0 = 0;
-	    filenum = 0;
+	    //filenum = 0;
 	    block_count=0;
 	    // Print end of recording conditions
 	    hashpipe_info(thread_name, "recording stopped: "
@@ -353,7 +408,7 @@ static void *run(hashpipe_thread_args_t * args)
 	  }
 	}
       }
-      printf("Before marking as free \n");
+      printf("CBF: Before marking as free \n");
       /* Mark as free */
       hpguppi_input_databuf_set_free(db, curblock);
 
@@ -389,7 +444,7 @@ static void *run(hashpipe_thread_args_t * args)
 
       // Update filterbank headers based on raw params and Nts etc.
       // Possibly here
-      printf("update_fb_hdrs_from_raw_hdr_cbf(fb_hdr, ptr) \n");
+      printf("CBF: update_fb_hdrs_from_raw_hdr_cbf(fb_hdr, ptr) \n");
       update_fb_hdrs_from_raw_hdr_cbf(fb_hdr, ptr);
 
       hgetr8(ptr, "OBSBW", &obsbw);
@@ -447,7 +502,7 @@ static void *run(hashpipe_thread_args_t * args)
           sprintf(fname, "%s.%04d-cbf%d.fil", pf.basefilename, filenum, b);
         }
 	open_flags = O_CREAT|O_RDWR|O_SYNC;
-        fprintf(stderr, "Opening next fil file '%s'\n", fname);
+        fprintf(stderr, "CBF: Opening next fil file '%s'\n", fname);
         fdraw[b] = open(fname, open_flags, 0644);
         if (fdraw[b]==-1) {
 	  hashpipe_error(thread_name, "Error opening file.");
@@ -466,7 +521,7 @@ static void *run(hashpipe_thread_args_t * args)
       hashpipe_status_unlock_safe(st);
 
       /* Write filterbank header to output file */
-      printf("fb_fd_write_header(fdraw[b], &fb_hdr); \n");
+      printf("CBF: fb_fd_write_header(fdraw[b], &fb_hdr); \n");
       if(block_count == 0){
 	for(int b = 0; b < N_BEAM; b++){
 	  fb_hdr.ibeam =  b;
@@ -474,7 +529,7 @@ static void *run(hashpipe_thread_args_t * args)
 	}
       }
 
-      printf("Before run_beamformer! \n");
+      printf("CBF: Before run_beamformer! \n");
       /* Write data */
       // gpu processing function here, I think...
 
@@ -498,9 +553,9 @@ static void *run(hashpipe_thread_args_t * args)
       time_taken = time_taken + (float)(tval_after.tv_nsec - tval_before.tv_nsec)*1e-9; // Time in nanoseconds since 'tv_sec - start and end'
       bf_time = time_taken;
 
-      printf("run_beamformer() plus set_to_zero() time: %f s\n", bf_time);
+      printf("CBF: run_beamformer() plus set_to_zero() time: %f s\n", bf_time);
 
-      printf("First element of output data: %f\n", output_data[0]);
+      printf("CBF: First element of output data: %f\n", output_data[0]);
 
       // Start timing write
       struct timespec tval_before_w, tval_after_w;
@@ -525,9 +580,9 @@ static void *run(hashpipe_thread_args_t * args)
       time_taken_w = (float)(tval_after_w.tv_sec - tval_before_w.tv_sec); //*1e6; // Time in seconds since epoch
       time_taken_w = time_taken_w + (float)(tval_after_w.tv_nsec - tval_before_w.tv_nsec)*1e-9; // Time in nanoseconds since 'tv_sec - start and end'
       write_time = time_taken_w;
-      printf("Time taken to write block to disk = %f s \n", write_time);
+      printf("CBF: Time taken to write block to disk = %f s \n", write_time);
       
-      printf("After write() function! Block index = %d \n", block_count);
+      printf("CBF: After write() function! Block index = %d \n", block_count);
 
       /* Increment counter */
       block_count++;
