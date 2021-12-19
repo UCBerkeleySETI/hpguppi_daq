@@ -328,38 +328,54 @@ static void *run(hashpipe_thread_args_t * args)
         // Creating the named file(FIFO)
         // mkfifo(<pathname>,<permission>)
         mkfifo(myfifo1, 0666);
-        // Open file as a read/write
-        fdw = open(myfifo1,O_RDWR);
-        if(fdw == -1){
-          printf("CBF: Unable to open fifo1 file...\n");
+
+        while(access(myfifo1, F_OK) == 0){
+          // If the FIFO has been deleted/removed by the get_delays module,
+          // then that means it has been read and we can go retrieve the delay polynomials
+          if(access(myfifo1, F_OK) != 0){
+            printf("CBF: FIFO used to write epoch for get_delays module was deleted...\n");
+            break;
+          }
+          // Open file as a read/write
+          fdw = open(myfifo1,O_RDWR);
+          if(fdw == -1){
+            printf("CBF: Unable to open fifo1 file...\n");
+          }
+
+          //printf("CBF: After open(myfifo1)...\n");
+
+          // Write to file
+          write_val = write(fdw, &epoch_sec, sizeof(epoch_sec));
+          if(write_val != sizeof(epoch_sec)){
+            printf("CBF: Error writing to FIFO!\n");
+          }
+
+          //printf("CBF: After write(myfifo1)...\n");
+
+          // Close file
+          close(fdw);
         }
 
-        printf("CBF: After open(myfifo1)...\n");
-
-        // Write to file
-        write_val = write(fdw, &epoch_sec, sizeof(epoch_sec));
-        if(write_val != sizeof(epoch_sec)){
-          printf("CBF: Error writing to FIFO!\n");
+        // Wait for this FIFO to be created by get_delays module
+        while(access(myfifo, F_OK) != 0){
+          if(access(myfifo, F_OK) == 0){
+            printf("CBF: FIFO for getting delay polynomials was created...\n");
+            break;
+          }
         }
-
-        printf("CBF: After write(myfifo1)...\n");
-
-        // Close file
-        close(fdw);
-
-        //if(remove(myfifo1) == 0){
-        //  printf("CBF: Successfully deleted epoch_sec FIFO\n");
-        //}
 
         // Now get the newly calculated polynomials from FIFO written to by get_delays module
         /* Periodically get delay polynomials */
-        // First check to see whether the file in /tmp used as a FIFO exists, currently called katpoint_delays
-        // If it exists, read the delays from the FIFO then compute new beamformer coefficients -> if( access( fname, F_OK ) == 0 )
+        // First check to see whether the file in /tmp used as a FIFO exists, currently called katpoint_delays and wait until it's deleted
+        // If it exists, read the delays from the FIFO then compute new beamformer coefficients -> while( access( fname, F_OK ) == 0 )
         // If it doesn't exist then that means no new delays have been calculated so continue on with the previously calculated delays.
-        if(access(myfifo, F_OK) == 0){
-          // Creating the named file(FIFO)
-          // mkfifo(<pathname>,<permission>)
-          //mkfifo(myfifo, 0666);
+        while(access(myfifo, F_OK) == 0){
+          // If the FIFO has been deleted/removed by the get_delays module,
+          // then that means it has been read and we can now generate the coefficients
+          if(access(myfifo, F_OK) != 0){
+            printf("CBF: FIFO for getting delay polynomials was deleted...\n");
+            break;
+          }
 
           // Open file as a read only
           printf("CBF: Before open(myfifo)...\n");
