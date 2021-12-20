@@ -161,13 +161,15 @@ static void *run(hashpipe_thread_args_t * args)
   // Or all calculations may be done in the while loop below
   // File descriptor
   int fdr;
-  int fdw;
+  int fdc;
+  int fde;
 
   // Return value of read() function
   int read_val;
 
   // Return value of write() function
-  int write_val;
+  int wvale;
+  int wvalc;
 
   // Array of floats to place data read from file
   float delay_pols[N_DELAYS];
@@ -176,7 +178,8 @@ static void *run(hashpipe_thread_args_t * args)
 
   // FIFO file path
   char * myfifo = "/tmp/katpoint_delays";
-  char * myfifo1= "/tmp/epoch";
+  char * myfifo_e= "/tmp/epoch";
+  char * myfifo_c= "/tmp/obsfreq";
 
   // Creating the named file(FIFO)
   // mkfifo(<pathname>,<permission>)
@@ -230,7 +233,7 @@ static void *run(hashpipe_thread_args_t * args)
   double realtime_secs = 0.0; // Real-time in seconds according to the RAW file metadata
   double epoch_sec = 0.0; // Epoch used for delay polynomial
   int n_update_blks = 3; // Number of blocks to update coefficients with new epoch
-
+  
   float* bf_coefficients; // Beamformer coefficients
   float* tmp_coefficients; // Temporary coefficients
 
@@ -297,18 +300,54 @@ static void *run(hashpipe_thread_args_t * args)
       hgetu4(ptr, "FENCHAN", &fenchan);
       hgetr8(ptr, "CHAN_BW", &chan_bw);
       hgetr8(ptr, "OBSFREQ", &obsfreq);
+
+      printf("CBF: Got center frequency, obsfreq = %lf Hz\n", obsfreq);
+  
+      // Write to new FIFO going to get_delays module for delay polynomial calculation
+      // Creating the named file(FIFO)
+      // mkfifo(<pathname>,<permission>)
+      mkfifo(myfifo_c, 0666);
+
+      while(access(myfifo_c, F_OK) == 0){
+        // If the FIFO has been deleted/removed by the get_delays module,
+        // then that means it has been read and we can go retrieve the delay polynomials
+        if(access(myfifo_c, F_OK) != 0){
+          printf("CBF: FIFO used to write center frequency to get_delays module was deleted...\n");
+          break;
+        }
+        // Open file as a read/write
+        fdc = open(myfifo_c,O_RDWR);
+        if(fdc == -1){
+          printf("CBF: Unable to open fifo_c file...\n");
+        }
+
+        //printf("CBF: After open(myfifo_c)...\n");
+
+        // Write to file
+        wvalc = write(fdc, &obsfreq, sizeof(obsfreq));
+        if(wvalc != 0){
+          printf("CBF: Written to obsfreq FIFO!\n");
+        }
+
+        //printf("CBF: After write(myfifo_c)...\n");
+
+        // Close file
+        close(fdc);
+      }
     }
 
     if(sim_flag == 0){
       // Update coefficients every specified number of blocks
       if(block_count%n_update_blks == 0){
 
+/*
         printf("CBF: synctime: %lu\n", synctime);
         printf("CBF: hclocks: %lu\n", hclocks);
         printf("CBF: fenchan: %lu\n", (unsigned long)fenchan);
         printf("CBF: chan_bw: %lf\n", chan_bw);
         printf("CBF: pktidx: %ld\n", pktidx);
         printf("CBF: obsfreq (MHz): %lf\n", obsfreq);
+*/
 
         // Calc real-time seconds since SYNCTIME for pktidx:
         //
@@ -320,40 +359,40 @@ static void *run(hashpipe_thread_args_t * args)
           realtime_secs = (pktidx * hclocks) / (2e6 * fenchan * fabs(chan_bw));
         }
 
-        epoch_sec = synctime + rint(realtime_secs);
+        epoch_sec = synctime + realtime_secs;
 
-        printf("CBF: Before open(myfifo1), epoch_sec = %lf...\n", epoch_sec);
+        printf("CBF: Before open(myfifo_e), epoch_sec = %lf...\n", epoch_sec);
   
         // Write to new FIFO going to get_delays module for delay polynomial calculation
         // Creating the named file(FIFO)
         // mkfifo(<pathname>,<permission>)
-        mkfifo(myfifo1, 0666);
+        mkfifo(myfifo_e, 0666);
 
-        while(access(myfifo1, F_OK) == 0){
+        while(access(myfifo_e, F_OK) == 0){
           // If the FIFO has been deleted/removed by the get_delays module,
           // then that means it has been read and we can go retrieve the delay polynomials
-          if(access(myfifo1, F_OK) != 0){
+          if(access(myfifo_e, F_OK) != 0){
             printf("CBF: FIFO used to write epoch for get_delays module was deleted...\n");
             break;
           }
           // Open file as a read/write
-          fdw = open(myfifo1,O_RDWR);
-          if(fdw == -1){
-            printf("CBF: Unable to open fifo1 file...\n");
+          fde = open(myfifo_e,O_RDWR);
+          if(fde == -1){
+            printf("CBF: Unable to open fifo_e file...\n");
           }
 
-          //printf("CBF: After open(myfifo1)...\n");
+          //printf("CBF: After open(myfifo_e)...\n");
 
           // Write to file
-          write_val = write(fdw, &epoch_sec, sizeof(epoch_sec));
-          if(write_val != sizeof(epoch_sec)){
-            printf("CBF: Error writing to FIFO!\n");
+          wvale = write(fde, &epoch_sec, sizeof(epoch_sec));
+          if(wvale != 0){
+            printf("CBF: written to epoch FIFO!\n");
           }
 
-          //printf("CBF: After write(myfifo1)...\n");
+          //printf("CBF: After write(myfifo_e)...\n");
 
           // Close file
-          close(fdw);
+          close(fde);
         }
 
         // Wait for this FIFO to be created by get_delays module
@@ -378,29 +417,28 @@ static void *run(hashpipe_thread_args_t * args)
           }
 
           // Open file as a read only
-          printf("CBF: Before open(myfifo)...\n");
+          //printf("CBF: Before open(myfifo)...\n");
           fdr = open(myfifo,O_RDWR);
           if(fdr == -1){
-            printf("CBF: Unable to open fifo1 file...\n");
+            printf("CBF: Unable to open fifo file...\n");
           }
 
-          printf("CBF: After open(myfifo)...\n");
+          //printf("CBF: After open(myfifo)...\n");
 
           // Read file
           read_val = read(fdr, delay_pols, sizeof(delay_pols));
           if(read_val != 0){
-            printf("\n");
+            printf("CBF: Read delays \n");
           }
-          printf("CBF: After delay read()...\n");
 
           // Close file
           close(fdr);
         }
+        // Update coefficients with realtime_secs
+        // Assign values to tmp variable then copy values from it to pinned memory pointer (bf_coefficients)
+        tmp_coefficients = generate_coefficients(delay_pols, obsfreq, epoch_sec);
+        memcpy(bf_coefficients, tmp_coefficients, N_COEFF*sizeof(float));
       }
-      // Update coefficients with realtime_secs
-      // Assign values to tmp variable then copy values from it to pinned memory pointer (bf_coefficients)
-      tmp_coefficients = generate_coefficients(delay_pols, obsfreq, epoch_sec);
-      memcpy(bf_coefficients, tmp_coefficients, N_COEFF*sizeof(float));
     }
 
     // If packet idx is NOT within start/stop range
