@@ -237,6 +237,13 @@ static void *run(hashpipe_thread_args_t * args)
   float* bf_coefficients; // Beamformer coefficients
   float* tmp_coefficients; // Temporary coefficients
 
+  // Frequency parameter initializations
+  float full_bw = 856e6; // Hz
+  float coarse_chan_band = 0; // Coarse channel bandwidth
+  double coarse_chan_freq[N_FREQ]; // Coarse channel center frequencies in the band 
+  int n_nodes = 64; // Number of compute nodes
+  int n_chan_per_node = 0; // Number of coarse channels per compute node
+
   int sim_flag = 0; // Flag to use simulated coefficients (set to 1) or calculated beamformer coefficients (set to 0)
   // Add if statement for generate_coefficients() function option which has 3 arguments - tau, coarse frequency channel, and epoch
   if(sim_flag == 1){
@@ -302,6 +309,18 @@ static void *run(hashpipe_thread_args_t * args)
       hgetr8(ptr, "OBSFREQ", &obsfreq);
 
       printf("CBF: Got center frequency, obsfreq = %lf Hz\n", obsfreq);
+
+      // Calculate coarse channel center frequencies depending on the mode and center frequency that spans the RAW file
+      coarse_chan_band = full_bw/fenchan;
+      n_chan_per_node = fenchan/n_nodes;
+
+      // Skip zeroth index since the number of coarse channels is even and the center frequency is between the 2 middle channels
+      for(int i=0; i<(n_chan_per_node/2); i++){
+        coarse_chan_freq[i] = (i-(n_chan_per_node/2))*coarse_chan_band + obsfreq;
+      }
+      for(int i=(n_chan_per_node/2); i<n_chan_per_node; i++){
+        coarse_chan_freq[i] = ((i+1)-(n_chan_per_node/2))*coarse_chan_band + obsfreq;
+      }
   
       // Write to new FIFO going to get_delays module for delay polynomial calculation
       // Creating the named file(FIFO)
@@ -436,7 +455,8 @@ static void *run(hashpipe_thread_args_t * args)
         }
         // Update coefficients with realtime_secs
         // Assign values to tmp variable then copy values from it to pinned memory pointer (bf_coefficients)
-        tmp_coefficients = generate_coefficients(delay_pols, obsfreq, epoch_sec);
+        //tmp_coefficients = generate_coefficients(delay_pols, obsfreq, epoch_sec);
+	tmp_coefficients = generate_coefficients(delay_pols, coarse_chan_freq, epoch_sec);
         memcpy(bf_coefficients, tmp_coefficients, N_COEFF*sizeof(float));
       }
     }
