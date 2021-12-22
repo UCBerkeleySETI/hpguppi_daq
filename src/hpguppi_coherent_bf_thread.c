@@ -127,7 +127,7 @@ static void *run(hashpipe_thread_args_t * args)
 
   /* Loop */
   int64_t pktidx=0, pktstart=0, pktstop=0;
-  int blocksize=(N_BF_POW/N_BEAM)*sizeof(float); // Size of beamformer output
+  int blocksize=0; // Size of beamformer output
   int curblock=0;
   int block_count=0, blocks_per_file=128, filenum=0, next_filenum=0;
   int got_packet_0=0, first=1;
@@ -230,6 +230,7 @@ static void *run(hashpipe_thread_args_t * args)
   uint64_t hclocks = 1;
   uint32_t fenchan = 1;
   double chan_bw = 1.0;
+  uint64_t nants = 0;
   double realtime_secs = 0.0; // Real-time in seconds according to the RAW file metadata
   double epoch_sec = 0.0; // Epoch used for delay polynomial
   int n_update_blks = 3; // Number of blocks to update coefficients with new epoch
@@ -248,7 +249,8 @@ static void *run(hashpipe_thread_args_t * args)
   // Add if statement for generate_coefficients() function option which has 3 arguments - tau, coarse frequency channel, and epoch
   if(sim_flag == 1){
     // Generate weights or coefficients (using simulate_coefficients() for now)
-    tmp_coefficients = simulate_coefficients();
+    int n_chan = N_COARSE_FREQ; // Value set in coherent_beamformer_char_in.h and used with simulated data when no RAW file is read
+    tmp_coefficients = simulate_coefficients(n_chan);
     // Register the array in pinned memory to speed HtoD mem copy
     coeff_pin(tmp_coefficients);
   }
@@ -307,12 +309,14 @@ static void *run(hashpipe_thread_args_t * args)
       hgetu4(ptr, "FENCHAN", &fenchan);
       hgetr8(ptr, "CHAN_BW", &chan_bw);
       hgetr8(ptr, "OBSFREQ", &obsfreq);
+      hgetu8(ptr, "NANTS", &nants);
 
       printf("CBF: Got center frequency, obsfreq = %lf Hz\n", obsfreq);
 
       // Calculate coarse channel center frequencies depending on the mode and center frequency that spans the RAW file
       coarse_chan_band = full_bw/fenchan;
       n_chan_per_node = fenchan/n_nodes;
+      blocksize=(N_BF_POW/N_BEAM)*(n_chan_per_node/MAX_COARSE_FREQ)*sizeof(float); // Size of beamformer output
 
       // Skip zeroth index since the number of coarse channels is even and the center frequency is between the 2 middle channels
       for(int i=0; i<(n_chan_per_node/2); i++){
@@ -322,6 +326,9 @@ static void *run(hashpipe_thread_args_t * args)
         coarse_chan_freq[i] = ((i+1)-(n_chan_per_node/2))*coarse_chan_band + obsfreq;
       }
   
+      // Check Redis for phase solution by comparing timestamp there with timestamp calculated with synctime from raw file
+      // Make sure the timestamp is converted to the mjd format used in the hpguppi_meerkat_spead_thread.c script
+
       // Write to new FIFO going to get_delays module for delay polynomial calculation
       // Creating the named file(FIFO)
       // mkfifo(<pathname>,<permission>)
@@ -456,7 +463,7 @@ static void *run(hashpipe_thread_args_t * args)
         // Update coefficients with realtime_secs
         // Assign values to tmp variable then copy values from it to pinned memory pointer (bf_coefficients)
         //tmp_coefficients = generate_coefficients(delay_pols, obsfreq, epoch_sec);
-	tmp_coefficients = generate_coefficients(delay_pols, coarse_chan_freq, epoch_sec);
+	tmp_coefficients = generate_coefficients(delay_pols, coarse_chan_freq, n_chan_per_node, nants, epoch_sec);
         memcpy(bf_coefficients, tmp_coefficients, N_COEFF*sizeof(float));
       }
     }
@@ -558,7 +565,7 @@ static void *run(hashpipe_thread_args_t * args)
       // Need to understand and appropriately modify these values if necessary
       // Default values for now
       fb_hdr.foff = obsbw;
-      fb_hdr.nchans = N_COARSE_FREQ;
+      fb_hdr.nchans = n_chan_per_node;
       fb_hdr.fch1 = obsfreq;
       fb_hdr.nbeams = N_BEAM;
       fb_hdr.tsamp = tbin * N_TIME;
@@ -597,6 +604,7 @@ static void *run(hashpipe_thread_args_t * args)
       /* Write filterbank header to output file */
       printf("CBF: fb_fd_write_header(fdraw[b], &fb_hdr); \n");
       if(block_count == 0){
+        printf("CBF: Writing headers to filterbank files! \n");
 	for(int b = 0; b < N_BEAM; b++){
 	  fb_hdr.ibeam =  b;
 	  fb_fd_write_header(fdraw[b], &fb_hdr);
@@ -612,10 +620,10 @@ static void *run(hashpipe_thread_args_t * args)
       clock_gettime(CLOCK_MONOTONIC, &tval_before);
 
       if(sim_flag == 1){
-        output_data = run_beamformer((signed char *)&db->block[curblock].data, tmp_coefficients);
+        output_data = run_beamformer((signed char *)&db->block[curblock].data, tmp_coefficients, n_chan_per_node);
       }
       if(sim_flag == 0){
-        output_data = run_beamformer((signed char *)&db->block[curblock].data, bf_coefficients);
+        output_data = run_beamformer((signed char *)&db->block[curblock].data, bf_coefficients, n_chan_per_node);
       }
 
       /* Set beamformer output (CUDA kernel before conversion to power), that is summing, to zero before moving on to next block*/
@@ -637,7 +645,7 @@ static void *run(hashpipe_thread_args_t * args)
 
       // This may be okay to write to filterbank files, but I'm not entirely confident
       for(int b = 0; b < N_BEAM; b++){
-	rv = write(fdraw[b], &output_data[b*N_TIME*N_FREQ], (size_t)blocksize);
+	rv = write(fdraw[b], &output_data[b*N_TIME*n_chan_per_node], (size_t)blocksize);
 	if(rv != blocksize){
 	  char msg[100];
           perror(thread_name);
