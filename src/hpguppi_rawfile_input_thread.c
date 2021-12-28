@@ -130,7 +130,7 @@ static void *run(hashpipe_thread_args_t * args)
     int n_chan = N_COARSE_FREQ; // Value set in coherent_beamformer_char_in.h and used with simulated data when no RAW file is read
     sim_data = (char *)simulate_data(n_chan); // Generate block of simulated data
     ssize_t read_blocsize;
-#if VERBOSE
+#if TIMING
     float read_time = 0;
     float time_taken_r = 0;
 #endif
@@ -201,7 +201,6 @@ static void *run(hashpipe_thread_args_t * args)
         }
 
         //Read data--------------------------------------------------
-	printf(" \n");
 	// Start timing read
 #if TIMING
         struct timespec tval_before, tval_after;

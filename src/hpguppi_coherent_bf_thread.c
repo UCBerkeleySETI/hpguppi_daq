@@ -25,6 +25,7 @@
 
 #include "ioprio.h"
 
+//#include "hpguppi_time.h"
 #include "coherent_beamformer_char_in.h"
 
 #include "hashpipe.h"
@@ -231,12 +232,14 @@ static void *run(hashpipe_thread_args_t * args)
   uint32_t fenchan = 1;
   double chan_bw = 1.0;
   uint64_t nants = 0;
+  //int n_telstate_phase = 0;
   double realtime_secs = 0.0; // Real-time in seconds according to the RAW file metadata
   double epoch_sec = 0.0; // Epoch used for delay polynomial
   int n_update_blks = 3; // Number of blocks to update coefficients with new epoch
   
   float* bf_coefficients; // Beamformer coefficients
   float* tmp_coefficients; // Temporary coefficients
+  //float* telstate_phase[N_PHASE*N_FREQ]; // Telstate phase solutions
 
   // Frequency parameter initializations
   float full_bw = 856e6; // Hz
@@ -311,23 +314,27 @@ static void *run(hashpipe_thread_args_t * args)
       hgetr8(ptr, "OBSFREQ", &obsfreq);
       hgetu8(ptr, "NANTS", &nants);
 
-      printf("CBF: Got center frequency, obsfreq = %lf Hz\n", obsfreq);
+      printf("CBF: Got center frequency, obsfreq = %lf MHz\n", obsfreq);
 
       // Calculate coarse channel center frequencies depending on the mode and center frequency that spans the RAW file
       coarse_chan_band = full_bw/fenchan;
-      n_chan_per_node = fenchan/n_nodes;
-      blocksize=(N_BF_POW/N_BEAM)*(n_chan_per_node/MAX_COARSE_FREQ)*sizeof(float); // Size of beamformer output
+      n_chan_per_node = ((int)fenchan)/n_nodes;
+      blocksize=((N_BF_POW*n_chan_per_node)/(N_BEAM*MAX_COARSE_FREQ))*sizeof(float); // Size of beamformer output
 
       // Skip zeroth index since the number of coarse channels is even and the center frequency is between the 2 middle channels
       for(int i=0; i<(n_chan_per_node/2); i++){
-        coarse_chan_freq[i] = (i-(n_chan_per_node/2))*coarse_chan_band + obsfreq;
+        coarse_chan_freq[i] = (i-(n_chan_per_node/2))*coarse_chan_band + (obsfreq*1e6);
       }
       for(int i=(n_chan_per_node/2); i<n_chan_per_node; i++){
-        coarse_chan_freq[i] = ((i+1)-(n_chan_per_node/2))*coarse_chan_band + obsfreq;
+        coarse_chan_freq[i] = ((i+1)-(n_chan_per_node/2))*coarse_chan_band + (obsfreq*1e6);
       }
-  
+
       // Check Redis for phase solution by comparing timestamp there with timestamp calculated with synctime from raw file
       // Make sure the timestamp is converted to the mjd format used in the hpguppi_meerkat_spead_thread.c script
+      //n_telstate_phase = N_PHASE*n_chan_per_node;
+
+      // Get the phase solutions and possibly copy the values to the telstate_phase array.
+      // Update by comparing the timestamps
 
       // Write to new FIFO going to get_delays module for delay polynomial calculation
       // Creating the named file(FIFO)
@@ -341,10 +348,12 @@ static void *run(hashpipe_thread_args_t * args)
           printf("CBF: FIFO used to write center frequency to get_delays module was deleted...\n");
           break;
         }
+
         // Open file as a read/write
         fdc = open(myfifo_c,O_RDWR);
         if(fdc == -1){
           printf("CBF: Unable to open fifo_c file...\n");
+          break;
         }
 
         //printf("CBF: After open(myfifo_c)...\n");
@@ -398,13 +407,15 @@ static void *run(hashpipe_thread_args_t * args)
           // If the FIFO has been deleted/removed by the get_delays module,
           // then that means it has been read and we can go retrieve the delay polynomials
           if(access(myfifo_e, F_OK) != 0){
-            printf("CBF: FIFO used to write epoch for get_delays module was deleted...\n");
+            printf("CBF: FIFO used to write epoch for get_delays script was deleted...\n");
             break;
           }
+
           // Open file as a read/write
           fde = open(myfifo_e,O_RDWR);
           if(fde == -1){
             printf("CBF: Unable to open fifo_e file...\n");
+            break;
           }
 
           //printf("CBF: After open(myfifo_e)...\n");
@@ -447,6 +458,7 @@ static void *run(hashpipe_thread_args_t * args)
           fdr = open(myfifo,O_RDWR);
           if(fdr == -1){
             printf("CBF: Unable to open fifo file...\n");
+            break;
           }
 
           //printf("CBF: After open(myfifo)...\n");
@@ -462,8 +474,8 @@ static void *run(hashpipe_thread_args_t * args)
         }
         // Update coefficients with realtime_secs
         // Assign values to tmp variable then copy values from it to pinned memory pointer (bf_coefficients)
-        //tmp_coefficients = generate_coefficients(delay_pols, obsfreq, epoch_sec);
-	tmp_coefficients = generate_coefficients(delay_pols, coarse_chan_freq, n_chan_per_node, nants, epoch_sec);
+        tmp_coefficients = generate_coefficients(delay_pols, coarse_chan_freq, n_chan_per_node, nants, epoch_sec);
+        //tmp_coefficients = generate_coefficients(delay_pols, telstate_phase, coarse_chan_freq, n_chan_per_node, nants, epoch_sec);
         memcpy(bf_coefficients, tmp_coefficients, N_COEFF*sizeof(float));
       }
     }
@@ -533,6 +545,7 @@ static void *run(hashpipe_thread_args_t * args)
       
 
       // Open N_BEAM filterbank files to save a beam per file i.e. N_BIN*N_TIME*sizeof(float) per file.
+      printf("CBF: Opening filterbank files \n");
       for(int b = 0; b < N_BEAM; b++){
         if(b >= 0 && b < 10) {
 	  sprintf(fname, "%s.%04d-cbf0%d.fil", pf.basefilename, filenum, b);
@@ -559,7 +572,7 @@ static void *run(hashpipe_thread_args_t * args)
         }
     	posix_fadvise(fdraw[b], 0, 0, POSIX_FADV_DONTNEED);
       }
-
+      printf("CBF: Opened filterbank files after for() loop \n");
 
       //Fix some header stuff here due to multi-antennas
       // Need to understand and appropriately modify these values if necessary
@@ -637,7 +650,7 @@ static void *run(hashpipe_thread_args_t * args)
 
       printf("CBF: run_beamformer() plus set_to_zero() time: %f s\n", bf_time);
 
-      printf("CBF: First element of output data: %f\n", output_data[0]);
+      printf("CBF: First element of output data: %f and writing to filterbank files \n", output_data[0]);
 
       // Start timing write
       struct timespec tval_before_w, tval_after_w;
@@ -662,7 +675,7 @@ static void *run(hashpipe_thread_args_t * args)
       time_taken_w = (float)(tval_after_w.tv_sec - tval_before_w.tv_sec); //*1e6; // Time in seconds since epoch
       time_taken_w = time_taken_w + (float)(tval_after_w.tv_nsec - tval_before_w.tv_nsec)*1e-9; // Time in nanoseconds since 'tv_sec - start and end'
       write_time = time_taken_w;
-      printf("CBF: Time taken to write block to disk = %f s \n", write_time);
+      printf("CBF: Time taken to write block of size, %d bytes, to disk = %f s \n", blocksize, write_time);
       
       printf("CBF: After write() function! Block index = %d \n", block_count);
 
