@@ -235,6 +235,11 @@ static void *run(hashpipe_thread_args_t * args)
   //int n_telstate_phase = 0;
   double realtime_secs = 0.0; // Real-time in seconds according to the RAW file metadata
   double epoch_sec = 0.0; // Epoch used for delay polynomial
+
+  // The number of blocks in a RAW file (128 blocks) should be divisible by n_calc_blks
+  // n_calc_blks is the duration of the delay polynomial calculation e.g. 128 blocks is approx. 5 seconds
+  // Currently, n_update_blks should not exceed 481 ms as stated by FBFUSE which is approximately 12 blocks
+  int n_calc_blks = 128; // Number of blocks to calculate delay polynomials
   int n_update_blks = 3; // Number of blocks to update coefficients with new epoch
   
   float* bf_coefficients; // Beamformer coefficients
@@ -373,7 +378,7 @@ static void *run(hashpipe_thread_args_t * args)
 
     if(sim_flag == 0){
       // Update coefficients every specified number of blocks
-      if(block_count%n_update_blks == 0){
+      if(block_count%n_calc_blks == 0){
 
 /*
         printf("CBF: synctime: %lu\n", synctime);
@@ -472,12 +477,35 @@ static void *run(hashpipe_thread_args_t * args)
           // Close file
           close(fdr);
         }
+      }
+
+      // Update coefficients every specified number of blocks
+      if(block_count%n_update_blks == 0){
+
+        // If statement to make sure the epoch_sec calculation isn't done twice unnecessarily
+        if(block_count%n_calc_blks != 0){
+          // Calc real-time seconds since SYNCTIME for pktidx:
+          //
+          //                        pktidx * hclocks
+          //     realtime_secs = -----------------------
+          //                      2e6 * fenchan * chan_bw
+          // This is the value that will be used in the delay polynomial (t, the epoch)
+          if(fenchan * chan_bw != 0.0) {
+            realtime_secs = (pktidx * hclocks) / (2e6 * fenchan * fabs(chan_bw));
+          }
+
+          epoch_sec = synctime + realtime_secs;
+        }
+
+        printf("CBF: In update coefficients if(), epoch_sec = %lf...\n", epoch_sec);
+
         // Update coefficients with realtime_secs
         // Assign values to tmp variable then copy values from it to pinned memory pointer (bf_coefficients)
         tmp_coefficients = generate_coefficients(delay_pols, coarse_chan_freq, n_chan_per_node, nants, epoch_sec);
         //tmp_coefficients = generate_coefficients(delay_pols, telstate_phase, coarse_chan_freq, n_chan_per_node, nants, epoch_sec);
         memcpy(bf_coefficients, tmp_coefficients, N_COEFF*sizeof(float));
       }
+
     }
 
     // If packet idx is NOT within start/stop range
@@ -562,7 +590,7 @@ static void *run(hashpipe_thread_args_t * args)
         fb_hdr.rawdatafile[80] = '\0';
                 
                 
-        fdraw[b] = open(fname, O_CREAT|O_WRONLY|O_TRUNC|O_SYNC, 0644);
+        fdraw[b] = open(fname, O_CREAT|O_WRONLY|O_TRUNC, 0644);
         if(fdraw[b] == -1) {
 	  // If we can't open this output file, we probably won't be able to
           // open any more output files, so print message and bail out.
