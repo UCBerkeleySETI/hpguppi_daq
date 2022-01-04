@@ -22,7 +22,15 @@ then
         echo Exiting...
         exit
     else
-        basefile=$2
+        # Path to file in first argument of execution
+        path_to_raw_files=$2
+
+        # Finds the oldest file in the directory
+        oldest_file=$(ls $path_to_raw_files -Art | head -n 1)
+
+        # Removes everything after the first period in the RAW file name
+        basefile=$path_to_raw_files"/"${oldest_file%%.*}
+        #basefile=$2
         outdir=${basefile}
         shift
     fi
@@ -46,7 +54,15 @@ then
         echo Exiting...
         exit
     else
-        basefile=$2
+        # Path to file in first argument of execution
+        path_to_raw_files=$2
+
+        # Finds the oldest file in the directory
+        oldest_file=$(ls $path_to_raw_files -Art | head -n 1)
+
+        # Removes everything after the first period in the RAW file name
+        basefile=$path_to_raw_files"/"${oldest_file%%.*}
+        #basefile=$2
         outdir=$3
         shift
     fi
