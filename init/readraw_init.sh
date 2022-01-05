@@ -25,11 +25,11 @@ then
         # Path to file in first argument of execution
         path_to_raw_files=$2
 
-        # Finds the oldest file in the directory
-        oldest_file=$(ls $path_to_raw_files -Art | head -n 1)
+        # Finds the first RAW file in the directory (which has file number before the file extension "0000.raw")
+        first_file=$(find $path_to_raw_files -type f -iname "*0000.raw")
 
         # Removes everything after the first period in the RAW file name
-        basefile=$path_to_raw_files"/"${oldest_file%%.*}
+        basefile=${first_file%%.*}
         #basefile=$2
         outdir=${basefile}
         shift
@@ -57,11 +57,11 @@ then
         # Path to file in first argument of execution
         path_to_raw_files=$2
 
-        # Finds the oldest file in the directory
-        oldest_file=$(ls $path_to_raw_files -Art | head -n 1)
+        # Finds the first RAW file in the directory (which has file number before the file extension "0000.raw")
+        first_file=$(find $path_to_raw_files -type f -iname "*0000.raw")
 
         # Removes everything after the first period in the RAW file name
-        basefile=$path_to_raw_files"/"${oldest_file%%.*}
+        basefile=${first_file%%.*}
         #basefile=$2
         outdir=$3
         shift

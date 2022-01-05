@@ -686,7 +686,8 @@ static void *run(hashpipe_thread_args_t * args)
 
       // This may be okay to write to filterbank files, but I'm not entirely confident
       for(int b = 0; b < N_BEAM; b++){
-	rv = write(fdraw[b], &output_data[b*N_TIME*n_chan_per_node], (size_t)blocksize);
+	//rv = write(fdraw[b], &output_data[b*N_TIME*n_chan_per_node], (size_t)blocksize);
+        rv = write(fdraw[b], &output_data[b*N_STI*n_chan_per_node], (size_t)blocksize);
 	if(rv != blocksize){
 	  char msg[100];
           perror(thread_name);
