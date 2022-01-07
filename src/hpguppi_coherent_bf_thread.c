@@ -138,6 +138,7 @@ static void *run(hashpipe_thread_args_t * args)
   double obsbw;
   double tbin;
   double obsfreq;
+  char basefilename[200];
   //int header_size = 0;
 
   // Filterbank file header initialization
@@ -508,6 +509,10 @@ static void *run(hashpipe_thread_args_t * args)
 
     }
 
+    // Get the appropriate basefile name from the rawfile_input_thread 
+    hgets(ptr, "BASEFILE", sizeof(basefilename), basefilename);
+    printf("CBF: Base filename from command: %s \n", basefilename);
+
     // If packet idx is NOT within start/stop range
     if(pktidx < pktstart || pktstop <= pktidx) {
       printf("CBF: Before checking whether files are open \n");
@@ -551,7 +556,7 @@ static void *run(hashpipe_thread_args_t * args)
       char fname[256];
       // Create the output directory if needed
       char datadir[1024];
-      strncpy(datadir, pf.basefilename, 1023);
+      strncpy(datadir, basefilename, 1023);
       char *last_slash = strrchr(datadir, '/');
       if (last_slash!=NULL && last_slash!=datadir) {
 	*last_slash = '\0';
@@ -576,9 +581,9 @@ static void *run(hashpipe_thread_args_t * args)
       printf("CBF: Opening filterbank files \n");
       for(int b = 0; b < N_BEAM; b++){
         if(b >= 0 && b < 10) {
-	  sprintf(fname, "%s.%04d-cbf0%d.fil", pf.basefilename, filenum, b);
+	  sprintf(fname, "%s.%04d-cbf0%d.fil", basefilename, filenum, b);
         }else{
-          sprintf(fname, "%s.%04d-cbf%d.fil", pf.basefilename, filenum, b);
+          sprintf(fname, "%s.%04d-cbf%d.fil", basefilename, filenum, b);
         }
         hashpipe_info(thread_name, "Opening fil file '%s'", fname);
 	  last_slash = strrchr(fname, '/');
@@ -619,9 +624,9 @@ static void *run(hashpipe_thread_args_t * args)
       for(int b = 0; b < N_BEAM; b++){
 	close(fdraw[b]);
         if(b >= 0 && b < 10) {
-	  sprintf(fname, "%s.%04d-cbf0%d.fil", pf.basefilename, filenum, b);
+	  sprintf(fname, "%s.%04d-cbf0%d.fil", basefilename, filenum, b);
         }else{
-          sprintf(fname, "%s.%04d-cbf%d.fil", pf.basefilename, filenum, b);
+          sprintf(fname, "%s.%04d-cbf%d.fil", basefilename, filenum, b);
         }
 	open_flags = O_CREAT|O_RDWR|O_SYNC;
         fprintf(stderr, "CBF: Opening next fil file '%s'\n", fname);

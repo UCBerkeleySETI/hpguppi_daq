@@ -123,7 +123,6 @@ static void *run(hashpipe_thread_args_t * args)
     char first_raw[200] = {0};
     char command[200] = {0};
     
-
     hgets(st.buf, "BASEFILE", sizeof(basefilename), basefilename);
     // Find path to file in file name
     char character = '/';
@@ -131,19 +130,19 @@ static void *run(hashpipe_thread_args_t * args)
     // strrchr() finds the last occurence of the specified character
     char *path_pos = strrchr(basefilename, character);
     long int char_pos = path_pos-basefilename;
-    printf("The last position of %c is %ld \n", character, char_pos);
+    printf("RAW INPUT: The last position of %c is %ld \n", character, char_pos);
 
     // Copy path portion of file name to new variable
     memcpy(path, basefilename, char_pos+1);
 
-    printf("Path to files is: %s\n", path);
+    printf("RAW INPUT: Path to files is: %s\n", path);
 
     strcpy(first_raw_ext, "*0000.raw");
     strcpy(first_raw, path);
     strcat(first_raw, first_raw_ext);
     strcpy(command, "ls ");
     strcat(command, first_raw);
-    printf("Terminal command: %s\n", command);
+    printf("RAW INPUT: Terminal command: %s\n", command);
 
     char cur_fname[200] = {0};
     FILE *fp;
@@ -199,28 +198,27 @@ static void *run(hashpipe_thread_args_t * args)
 #endif
         //Read raw files
         if (fdin == -1) { //no file opened
-            if(fname == NULL){
-                fp = popen(command, "r");
-                if (fp == NULL){
-                    printf("Failed to execute command!\n");
-                }
-                // If there is no file ready at the beginning of processing then wait for it to be written to the buffer.
-                while(1){
-                    // If a '...0000.raw' file exists
-                    if (fgets(cur_fname, 200, fp) != NULL){
-                        base_pos = strchr(cur_fname, '.'); // Finds the first occurence of a period in the filename
-                        period_pos = base_pos-cur_fname;
-                        memcpy(basefilename, cur_fname, period_pos); // Copy base filename portion of file name to tmp_basefilename variable
-                        printf("Base filename from command: %s \n", basefilename);
-                        break;
-                    }
-                }
-                pclose_status = pclose(fp);
-                if (pclose_status == -1) {
-                    printf("Failed to close pipe!\n");
-                }
-                sprintf(fname, "%s.%04d.raw", basefilename, filenum);
+            fp = popen(command, "r");
+            if (fp == NULL){
+                printf("RAW INPUT: Failed to execute command!\n");
             }
+            // If there is no file ready at the beginning of processing then wait for it to be written to the buffer.
+            while(1){
+                // If a '...0000.raw' file exists
+                if (fgets(cur_fname, 200, fp) != NULL){
+                    base_pos = strchr(cur_fname, '.'); // Finds the first occurence of a period in the filename
+                    period_pos = base_pos-cur_fname;
+                    memcpy(basefilename, cur_fname, period_pos); // Copy base filename portion of file name to tmp_basefilename variable
+                    printf("RAW INPUT: Base filename from command: %s \n", basefilename);
+                    break;
+                }
+            }
+            pclose_status = pclose(fp);
+            if (pclose_status == -1) {
+                printf("Failed to close pipe!\n");
+            }
+            sprintf(fname, "%s.%04d.raw", basefilename, filenum);
+            
             printf("RAW INPUT: Opening first raw file '%s'\n", fname);
             hputs(st.buf, "BASEFILE", basefilename);
             fdin = open(fname, open_flags, 0644);
