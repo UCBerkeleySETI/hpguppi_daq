@@ -13,10 +13,10 @@
 // but this keeps things 4K (i.e. page) aligned.
 #define ALIGNMENT_SIZE (4096)
 
-#define N_INPUT_BLOCKS 24
+#define N_INPUT_BLOCKS 3 // 24
 #define BLOCK_HDR_SIZE  (5*80*512)      // in bytes, from guppi_daq_server
-//#define BLOCK_DATA_SIZE (128*1024*1024) // in bytes, from guppi_daq_server (4k mode)
-#define BLOCK_DATA_SIZE (128*1024*1024*8) // in bytes, from guppi_daq_server (32k mode)
+#define BLOCK_DATA_SIZE (128*1024*1024) // in bytes, from guppi_daq_server
+#define N_FILE 64 // Number of RAW files per processing period or in the NVMe buffer i.e. Number of files to be processed before acquiring data again
 
 typedef struct hpguppi_input_block {
   char hdr[BLOCK_HDR_SIZE];

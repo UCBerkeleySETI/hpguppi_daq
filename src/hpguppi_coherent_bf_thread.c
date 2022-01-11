@@ -91,7 +91,9 @@ update_fb_hdrs_from_raw_hdr_cbf(fb_hdr_t fb_hdr, const char *p_rawhdr)
     - raw_hdr.obsbw*(raw_hdr.obsnchan-1)/(2*raw_hdr.obsnchan)
     - (N_TIME/2) * fb_hdr.foff
     ;//TODO + schan * raw_hdr.obsbw / raw_hdr.obsnchan; // Adjust for schan
-  fb_hdr.nchans = N_COARSE_FREQ;
+  //fb_hdr.nchans = 16; // 1k mode
+  fb_hdr.nchans = 64; // 4k mode
+  //fb_hdr.nchans = 512; // 32k mode
   fb_hdr.tsamp = raw_hdr.tbin * N_TIME * 256*1024;
   // TODO az_start, za_start
 }
@@ -128,7 +130,7 @@ static void *run(hashpipe_thread_args_t * args)
 
   /* Loop */
   int64_t pktidx=0, pktstart=0, pktstop=0;
-  int blocksize=0; // Size of beamformer output
+  int blocksize=0; // Size of beamformer output (output block size)
   int curblock=0;
   int block_count=0, blocks_per_file=128, filenum=0, next_filenum=0;
   int got_packet_0=0, first=1;
@@ -139,6 +141,12 @@ static void *run(hashpipe_thread_args_t * args)
   double tbin;
   double obsfreq;
   char basefilename[200];
+  char outdir[200];
+  char character = '/';
+  char *char_offset; 
+  long int slash_pos;
+  char raw_basefilename[200];
+  char new_base[200];
   //int header_size = 0;
 
   // Filterbank file header initialization
@@ -157,7 +165,6 @@ static void *run(hashpipe_thread_args_t * args)
   float write_time = 0;
   float time_taken = 0;
   float time_taken_w = 0;
-
 
   // --------------------- Initial delay calculations with katpoint and mosaic --------------------------------//
   // Or all calculations may be done in the while loop below
@@ -183,48 +190,7 @@ static void *run(hashpipe_thread_args_t * args)
   char * myfifo_e= "/tmp/epoch";
   char * myfifo_c= "/tmp/obsfreq";
 
-  // Creating the named file(FIFO)
-  // mkfifo(<pathname>,<permission>)
-  //mkfifo(myfifo, 0666);
-  
-
   printf("CBF: After mkfifos...\n");
-
-/*
-  // Open file as a read only
-  fdr = open(myfifo,O_RDONLY);
-
-  printf("CBF: After first open(myfifo)...\n");
-
-  // Read file
-  read_val = read(fdr, delay_pols, sizeof(delay_pols));
-  if(read_val != 0){
-    printf("\n");
-  }
-
-  printf("CBF: After first read()...\n");
-
-  // Close file
-  close(fdr);
-
-  printf("Size of delay array %lu\n", sizeof(delay_pols));
-
-  // First beam
-  printf("--------------First beam delay offset---------------\n");
-  printf("CBF: idx %lu in result array = %e \n", delay_idx(0, 0, 0), delay_pols[delay_idx(0, 0, 0)]);
-  printf("CBF: idx %lu in result array = %e \n", delay_idx(0, 1, 0), delay_pols[delay_idx(0, 1, 0)]);
-  printf("CBF: idx %lu in result array = %e \n", delay_idx(0, 2, 0), delay_pols[delay_idx(0, 2, 0)]);
-  // Second beam delay
-  printf("--------------Second beam delay offset--------------\n");
-  printf("CBF: idx %lu in result array = %e \n", delay_idx(0, 0, 1), delay_pols[delay_idx(0, 0, 1)]);
-  printf("CBF: idx %lu in result array = %e \n", delay_idx(0, 1, 1), delay_pols[delay_idx(0, 1, 1)]);
-  printf("CBF: idx %lu in result array = %e \n", delay_idx(0, 2, 1), delay_pols[delay_idx(0, 2, 1)]);
-  // Second beam rate
-  printf("---------------Second beam delay rate----------------\n");
-  printf("CBF: idx %lu in result array = %e \n", delay_idx(1, 0, 1), delay_pols[delay_idx(1, 0, 1)]); // 129
-  printf("CBF: idx %lu in result array = %e \n", delay_idx(1, 1, 1), delay_pols[delay_idx(1, 1, 1)]); // 131
-  printf("CBF: idx %lu in result array = %e \n", delay_idx(1, 2, 1), delay_pols[delay_idx(1, 2, 1)]); // 133
-*/
   // ------------------------------------------------------------------------------------------------//
 
   
@@ -233,6 +199,11 @@ static void *run(hashpipe_thread_args_t * args)
   uint32_t fenchan = 1;
   double chan_bw = 1.0;
   uint64_t nants = 0;
+  uint64_t obsnchan = 0;
+  uint64_t npol = 0;
+  uint64_t blksize = 0; // Raw file block size
+  int nt = 0; // Number of time samples per block in a RAW file
+  int ns = 0; // Number of STI windows in output
   //int n_telstate_phase = 0;
   double realtime_secs = 0.0; // Real-time in seconds according to the RAW file metadata
   double epoch_sec = 0.0; // Epoch used for delay polynomial
@@ -258,7 +229,10 @@ static void *run(hashpipe_thread_args_t * args)
   // Add if statement for generate_coefficients() function option which has 3 arguments - tau, coarse frequency channel, and epoch
   if(sim_flag == 1){
     // Generate weights or coefficients (using simulate_coefficients() for now)
-    int n_chan = N_COARSE_FREQ; // Value set in coherent_beamformer_char_in.h and used with simulated data when no RAW file is read
+    // Used with simulated data when no RAW file is read
+    //int n_chan = 16;  // 1k mode
+    int n_chan = 64;  // 4k mode
+    //int n_chan = 512; // 32k mode
     tmp_coefficients = simulate_coefficients(n_chan);
     // Register the array in pinned memory to speed HtoD mem copy
     coeff_pin(tmp_coefficients);
@@ -319,8 +293,14 @@ static void *run(hashpipe_thread_args_t * args)
       hgetr8(ptr, "CHAN_BW", &chan_bw);
       hgetr8(ptr, "OBSFREQ", &obsfreq);
       hgetu8(ptr, "NANTS", &nants);
+      hgetu8(ptr, "BLOCSIZE", &blksize); // Raw file block size
+      hgetu8(ptr, "OBSNCHAN", &obsnchan);
+      hgetu8(ptr, "NPOL", &npol);
 
-      printf("CBF: Got center frequency, obsfreq = %lf MHz\n", obsfreq);
+      // Number of time samples per block in a RAW file
+      nt = (int)(blksize/(2*obsnchan*npol));
+
+      printf("CBF: Got center frequency, obsfreq = %lf MHz and n. time samples = %d \n", obsfreq, nt);
 
       // Calculate coarse channel center frequencies depending on the mode and center frequency that spans the RAW file
       coarse_chan_band = full_bw/fenchan;
@@ -509,9 +489,30 @@ static void *run(hashpipe_thread_args_t * args)
 
     }
 
-    // Get the appropriate basefile name from the rawfile_input_thread 
-    hgets(ptr, "BASEFILE", sizeof(basefilename), basefilename);
-    printf("CBF: Base filename from command: %s \n", basefilename);
+    // Get the appropriate basefile name from the rawfile_input_thread  
+    if(filenum == 0 && block_count == 0){ // Check for the basefile name at the beginning of the first file in the 5 minute period
+      hashpipe_status_lock_safe(st);
+      hgets(st->buf, "BASEFILE", sizeof(raw_basefilename), raw_basefilename);
+      hgets(st->buf, "OUTDIR", sizeof(outdir), outdir);
+      hashpipe_status_unlock_safe(st);
+      printf("CBF: RAW file base filename from command: %s and outdir is: %s \n", raw_basefilename, outdir);
+
+      // Get filterbank file path
+      // strrchr() finds the last occurence of the specified character
+      char_offset = strrchr(raw_basefilename, character);
+      slash_pos = char_offset-raw_basefilename;
+      printf("The last position of %c is %ld \n", character, slash_pos);
+
+      // Get file name with no path
+      memcpy(new_base, &raw_basefilename[slash_pos+1], sizeof(raw_basefilename)-slash_pos);
+      printf("File name with no path: %s \n", new_base);
+
+      // Set specified path to write filterbank files
+      strcpy(basefilename, outdir);
+      strcat(basefilename, "/");
+      strcat(basefilename, new_base);
+      printf("File name with new path: %s \n", basefilename);
+    }
 
     // If packet idx is NOT within start/stop range
     if(pktidx < pktstart || pktstop <= pktidx) {
@@ -577,7 +578,7 @@ static void *run(hashpipe_thread_args_t * args)
       hgetr8(ptr,"TBIN", &tbin);
       
 
-      // Open N_BEAM filterbank files to save a beam per file i.e. N_BIN*N_TIME*sizeof(float) per file.
+      // Open N_BEAM filterbank files to save a beam per file i.e. N_BIN*nt*sizeof(float) per file.
       printf("CBF: Opening filterbank files \n");
       for(int b = 0; b < N_BEAM; b++){
         if(b >= 0 && b < 10) {
@@ -614,26 +615,30 @@ static void *run(hashpipe_thread_args_t * args)
       fb_hdr.nchans = n_chan_per_node;
       fb_hdr.fch1 = obsfreq;
       fb_hdr.nbeams = N_BEAM;
-      fb_hdr.tsamp = tbin * N_TIME;
+      fb_hdr.tsamp = tbin * nt;
     }
 
     /* See if we need to open next file */
     if (block_count >= blocks_per_file) {
       filenum++;
-      char fname[256];
-      for(int b = 0; b < N_BEAM; b++){
-	close(fdraw[b]);
-        if(b >= 0 && b < 10) {
-	  sprintf(fname, "%s.%04d-cbf0%d.fil", basefilename, filenum, b);
-        }else{
-          sprintf(fname, "%s.%04d-cbf%d.fil", basefilename, filenum, b);
-        }
-	open_flags = O_CREAT|O_RDWR|O_SYNC;
-        fprintf(stderr, "CBF: Opening next fil file '%s'\n", fname);
-        fdraw[b] = open(fname, open_flags, 0644);
-        if (fdraw[b]==-1) {
-	  hashpipe_error(thread_name, "Error opening file.");
-          pthread_exit(NULL);
+      if(filenum >= N_FILE){
+        filenum = 0;
+      }else{
+        char fname[256];
+        for(int b = 0; b < N_BEAM; b++){
+          close(fdraw[b]);
+          if(b >= 0 && b < 10) {
+            sprintf(fname, "%s.%04d-cbf0%d.fil", basefilename, filenum, b);
+          }else{
+            sprintf(fname, "%s.%04d-cbf%d.fil", basefilename, filenum, b);
+          }
+          open_flags = O_CREAT|O_RDWR|O_SYNC;
+          fprintf(stderr, "CBF: Opening next fil file '%s'\n", fname);
+          fdraw[b] = open(fname, open_flags, 0644);
+          if (fdraw[b]==-1) {
+            hashpipe_error(thread_name, "Error opening file.");
+            pthread_exit(NULL);
+          }
         }
       }
       block_count=0;
@@ -666,10 +671,10 @@ static void *run(hashpipe_thread_args_t * args)
       clock_gettime(CLOCK_MONOTONIC, &tval_before);
 
       if(sim_flag == 1){
-        output_data = run_beamformer((signed char *)&db->block[curblock].data, tmp_coefficients, n_chan_per_node);
+        output_data = run_beamformer((signed char *)&db->block[curblock].data, tmp_coefficients, n_chan_per_node, nt);
       }
       if(sim_flag == 0){
-        output_data = run_beamformer((signed char *)&db->block[curblock].data, bf_coefficients, n_chan_per_node);
+        output_data = run_beamformer((signed char *)&db->block[curblock].data, bf_coefficients, n_chan_per_node, nt);
       }
 
       /* Set beamformer output (CUDA kernel before conversion to power), that is summing, to zero before moving on to next block*/
@@ -691,8 +696,9 @@ static void *run(hashpipe_thread_args_t * args)
 
       // This may be okay to write to filterbank files, but I'm not entirely confident
       for(int b = 0; b < N_BEAM; b++){
-	//rv = write(fdraw[b], &output_data[b*N_TIME*n_chan_per_node], (size_t)blocksize);
-        rv = write(fdraw[b], &output_data[b*N_STI*n_chan_per_node], (size_t)blocksize);
+	//rv = write(fdraw[b], &output_data[b*nt*n_chan_per_node], (size_t)blocksize);
+        ns = nt/N_TIME_STI;
+        rv = write(fdraw[b], &output_data[b*ns*n_chan_per_node], (size_t)blocksize);
 	if(rv != blocksize){
 	  char msg[100];
           perror(thread_name);

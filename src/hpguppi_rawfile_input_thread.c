@@ -30,7 +30,6 @@
 
 #define VERBOSE 0
 #define TIMING 0
-#define N_FILE 64
 
 int get_header_size(int fdin, char * header_buf, size_t len)
 {
@@ -159,8 +158,9 @@ static void *run(hashpipe_thread_args_t * args)
     int directio = 0;
     int sim_flag = 0; // Set to 1 if you'd like to use simulated data rather than the payload from the RAW file
     char * sim_data; // Initialize simulated data array
-    int n_chan = N_COARSE_FREQ; // Value set in coherent_beamformer_char_in.h and used with simulated data when no RAW file is read
-    sim_data = (char *)simulate_data(n_chan); // Generate block of simulated data
+    int n_chan = 64; // Value set in coherent_beamformer_char_in.h and used with simulated data when no RAW file is read
+    int nt = 8192; 
+    sim_data = (char *)simulate_data(n_chan, nt); // Generate block of simulated data
     ssize_t read_blocsize;
 #if TIMING
     float read_time = 0;
@@ -206,9 +206,12 @@ static void *run(hashpipe_thread_args_t * args)
             while(1){
                 // If a '...0000.raw' file exists
                 if (fgets(cur_fname, 200, fp) != NULL){
+                    printf("Got current RAW file: %s\n", cur_fname);
                     base_pos = strchr(cur_fname, '.'); // Finds the first occurence of a period in the filename
                     period_pos = base_pos-cur_fname;
+                    printf("The last position of . is %ld \n", period_pos);
                     memcpy(basefilename, cur_fname, period_pos); // Copy base filename portion of file name to tmp_basefilename variable
+                    hputs(st.buf, "BASEFILE", basefilename);
                     printf("RAW INPUT: Base filename from command: %s \n", basefilename);
                     break;
                 }
@@ -220,7 +223,6 @@ static void *run(hashpipe_thread_args_t * args)
             sprintf(fname, "%s.%04d.raw", basefilename, filenum);
             
             printf("RAW INPUT: Opening first raw file '%s'\n", fname);
-            hputs(st.buf, "BASEFILE", basefilename);
             fdin = open(fname, open_flags, 0644);
             if (fdin==-1) {
                 hashpipe_error(__FUNCTION__,"Error opening file.");
@@ -312,6 +314,7 @@ static void *run(hashpipe_thread_args_t * args)
                     if (fgets(cur_fname, 200, fp) != NULL){
                         // And is not the same as the previous '...0000.raw' file, then break out of the loop.
                         if(strncmp(fname, cur_fname,strlen(fname)) != 0){
+/*
                             strcpy(fname, cur_fname); // Copies current file name to fname
                             printf("Got current RAW file: %s\n", fname);
                             base_pos = strchr(fname, '.'); // Finds the first occurence of a period in the filename
@@ -320,9 +323,14 @@ static void *run(hashpipe_thread_args_t * args)
                             memcpy(basefilename, fname, period_pos); // Copy base filename portion of file name to basefilename variable
                             printf("Base filename is: %s\n", basefilename);
                             hputs(st.buf, "BASEFILE", basefilename);
+*/
+                            printf("Got first RAW file of next period: %s\n", cur_fname);
                             filenum=0;
                             fdin=-1;
                             break;
+                        }else{
+                            printf("Base file name has not changed! \n");
+                            continue;
                         }
                     }
                     pclose_status = pclose(fp);
