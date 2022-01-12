@@ -137,10 +137,10 @@ static void *run(hashpipe_thread_args_t * args)
     printf("RAW INPUT: Path to files is: %s\n", path);
 
     strcpy(first_raw_ext, "*0000.raw");
-    strcpy(first_raw, path);
-    strcat(first_raw, first_raw_ext);
+    //strcpy(first_raw, path); // Path will change based on status buffer
+    //strcat(first_raw, first_raw_ext);
     strcpy(command, "ls ");
-    strcat(command, first_raw);
+    //strcat(command, first_raw);
     printf("RAW INPUT: Terminal command: %s\n", command);
 
     char cur_fname[200] = {0};
@@ -198,11 +198,17 @@ static void *run(hashpipe_thread_args_t * args)
 #endif
         //Read raw files
         if (fdin == -1) { //no file opened
+            strcpy(first_raw, path); // Path will change based on status buffer
+            strcat(first_raw, first_raw_ext);
+            strcat(command, first_raw);
+            printf("RAW INPUT: Terminal command: %s\n", command);
             fp = popen(command, "r");
             if (fp == NULL){
                 printf("RAW INPUT: Failed to execute command!\n");
             }
             // If there is no file ready at the beginning of processing then wait for it to be written to the buffer.
+            // Aware of the fact that "while(True) with a break under an if statement" is considered bad practice, but 
+            // it makes the most sense waiting for an arbitrary file to show up. 
             while(1){
                 // If a '...0000.raw' file exists
                 if (fgets(cur_fname, 200, fp) != NULL){
@@ -305,39 +311,8 @@ static void *run(hashpipe_thread_args_t * args)
             filenum++;
             // Find new basefilename after reading all the ones in the NVMe buffer
             if(filenum >= N_FILE){
-                while(1){
-                    fp = popen(command, "r");
-                    if (fp == NULL){
-                        printf("Failed to execute command!\n");
-                    }
-                    // If a '...0000.raw' file exists
-                    if (fgets(cur_fname, 200, fp) != NULL){
-                        // And is not the same as the previous '...0000.raw' file, then break out of the loop.
-                        if(strncmp(fname, cur_fname,strlen(fname)) != 0){
-/*
-                            strcpy(fname, cur_fname); // Copies current file name to fname
-                            printf("Got current RAW file: %s\n", fname);
-                            base_pos = strchr(fname, '.'); // Finds the first occurence of a period in the filename
-                            period_pos = base_pos-fname;
-                            printf("The last position of . is %ld \n", period_pos);
-                            memcpy(basefilename, fname, period_pos); // Copy base filename portion of file name to basefilename variable
-                            printf("Base filename is: %s\n", basefilename);
-                            hputs(st.buf, "BASEFILE", basefilename);
-*/
-                            printf("Got first RAW file of next period: %s\n", cur_fname);
-                            filenum=0;
-                            fdin=-1;
-                            break;
-                        }else{
-                            printf("Base file name has not changed! \n");
-                            continue;
-                        }
-                    }
-                    pclose_status = pclose(fp);
-                    if (pclose_status == -1) {
-                        printf("Failed to close pipe!\n");
-                    }
-                }
+                filenum=0;
+                fdin=-1;
             }else{
                 sprintf(fname, "%s.%4.4d.raw", basefilename, filenum);
                 printf("RAW INPUT: Opening next raw file '%s'\n", fname);
