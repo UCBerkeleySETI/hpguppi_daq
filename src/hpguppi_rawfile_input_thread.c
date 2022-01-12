@@ -7,7 +7,7 @@
  * Author: Cherry Ng
  */
 #define MAX_HDR_SIZE (256000)
-#define BLOC_PER_FILE (128)
+#define MAX_BLKS_PER_FILE (128)
 
 #define _GNU_SOURCE 1
 #include <stdio.h>
@@ -117,35 +117,12 @@ static void *run(hashpipe_thread_args_t * args)
     //Filenames and paths
     char basefilename[200];
     char fname[256];
-    char path[200] = {0};
-    char first_raw_ext[200] = {0};
-    char first_raw[200] = {0};
-    char command[200] = {0};
     
     hgets(st.buf, "BASEFILE", sizeof(basefilename), basefilename);
-    // Find path to file in file name
-    char character = '/';
-
-    // strrchr() finds the last occurence of the specified character
-    char *path_pos = strrchr(basefilename, character);
-    long int char_pos = path_pos-basefilename;
-    printf("RAW INPUT: The last position of %c is %ld \n", character, char_pos);
-
-    // Copy path portion of file name to new variable
-    memcpy(path, basefilename, char_pos+1);
-
-    printf("RAW INPUT: Path to files is: %s\n", path);
-
-    strcpy(first_raw_ext, "*0000.raw");
-    //strcpy(first_raw, path); // Path will change based on status buffer
-    //strcat(first_raw, first_raw_ext);
-    strcpy(command, "ls ");
-    //strcat(command, first_raw);
-    printf("RAW INPUT: Terminal command: %s\n", command);
 
     char cur_fname[200] = {0};
-    FILE *fp;
-    int pclose_status;
+    char tmp_fname[200] = {0};
+    strcpy(tmp_fname, "tmp_fname"); // Initialize as different string that cur_fname
     char *base_pos;
     long int period_pos;
 
@@ -162,6 +139,8 @@ static void *run(hashpipe_thread_args_t * args)
     int nt = 8192; 
     sim_data = (char *)simulate_data(n_chan, nt); // Generate block of simulated data
     ssize_t read_blocsize;
+    long int raw_size = 0;
+    long int blocks_per_file = 0;
 #if TIMING
     float read_time = 0;
     float time_taken_r = 0;
@@ -198,20 +177,17 @@ static void *run(hashpipe_thread_args_t * args)
 #endif
         //Read raw files
         if (fdin == -1) { //no file opened
-            strcpy(first_raw, path); // Path will change based on status buffer
-            strcat(first_raw, first_raw_ext);
-            strcat(command, first_raw);
-            printf("RAW INPUT: Terminal command: %s\n", command);
-            fp = popen(command, "r");
-            if (fp == NULL){
-                printf("RAW INPUT: Failed to execute command!\n");
-            }
+            
             // If there is no file ready at the beginning of processing then wait for it to be written to the buffer.
             // Aware of the fact that "while(True) with a break under an if statement" is considered bad practice, but 
             // it makes the most sense waiting for an arbitrary file to show up. 
             while(1){
-                // If a '...0000.raw' file exists
-                if (fgets(cur_fname, 200, fp) != NULL){
+                hashpipe_status_lock_safe(&st);
+                hgets(st.buf, "RAWFILE", sizeof(cur_fname), cur_fname);
+                hashpipe_status_unlock_safe(&st);
+                // If a '...0000.raw' file exists, that is different from the previous '...0000.raw' file
+                if ((strlen(cur_fname) != 0) && (tmp_fname != cur_fname)){
+                    strcpy(tmp_fname, cur_fname); // Save this file name for comparison on the next iteration
                     printf("Got current RAW file: %s\n", cur_fname);
                     base_pos = strchr(cur_fname, '.'); // Finds the first occurence of a period in the filename
                     period_pos = base_pos-cur_fname;
@@ -222,10 +198,7 @@ static void *run(hashpipe_thread_args_t * args)
                     break;
                 }
             }
-            pclose_status = pclose(fp);
-            if (pclose_status == -1) {
-                printf("Failed to close pipe!\n");
-            }
+            
             sprintf(fname, "%s.%04d.raw", basefilename, filenum);
             
             printf("RAW INPUT: Opening first raw file '%s'\n", fname);
@@ -234,6 +207,9 @@ static void *run(hashpipe_thread_args_t * args)
                 hashpipe_error(__FUNCTION__,"Error opening file.");
                 pthread_exit(NULL);
             }
+            // Get size of file to help determine the number of blocks
+            raw_size = lseek(fdin,0,SEEK_END); // Find the end position of file
+            lseek(fdin,0,SEEK_SET); // Reset to the start
         }
 
         //Handling header - size, output path, directio----------------
@@ -270,12 +246,23 @@ static void *run(hashpipe_thread_args_t * args)
         ptr = hpguppi_databuf_data(db, block_idx);
         lseek(fdin, headersize-MAX_HDR_SIZE, SEEK_CUR);
         blocsize = get_block_size(header_buf, MAX_HDR_SIZE);
+        if(block_count == 0){
+            blocks_per_file = raw_size/(blocsize+headersize); // Number of blocks in the current RAW file
+            printf("RAW INPUT: Block 0 RAW file size: %ld, and  n. blocks: %ld \n", raw_size, raw_size/(blocsize+headersize));
+        }
 #if VERBOSE
         printf("RAW INPUT: Block size: %d, and  BLOCK_DATA_SIZE: %d \n", blocsize, BLOCK_DATA_SIZE);
         printf("RAW INPUT: header size: %d, and  MAX_HDR_SIZE: %d \n", headersize, MAX_HDR_SIZE);
+        if(block_count == 0){
+            printf("RAW INPUT: Block 0 block size: %d, and  BLOCK_DATA_SIZE: %d \n", blocsize, BLOCK_DATA_SIZE);
+            printf("RAW INPUT: Block 0 header size: %d, and  MAX_HDR_SIZE: %d \n", headersize, MAX_HDR_SIZE);
+            printf("RAW INPUT: Block 0 RAW file size: %ld, and  n. blocks: %ld \n", raw_size, raw_size/(blocsize+headersize));
+        }
 #endif
 	if(sim_flag == 0){
-	    //read_blocsize = read_fully(fdin, ptr, blocsize);
+            // If a block is missing, copy a block of zeros to the buffer in it's place
+            // Otherwise, write the data from a block to the buffer
+
 	    read_blocsize = read(fdin, ptr, blocsize);
             if(block_count == 0){
                 printf("RAW INPUT: Number of bytes read in read(): %zd \n", read_blocsize);
@@ -306,7 +293,7 @@ static void *run(hashpipe_thread_args_t * args)
         block_count++;
 
         /* See if we need to open next file */
-        if (block_count>= BLOC_PER_FILE) {
+        if (block_count>= blocks_per_file) {
             close(fdin);
             filenum++;
             // Find new basefilename after reading all the ones in the NVMe buffer
