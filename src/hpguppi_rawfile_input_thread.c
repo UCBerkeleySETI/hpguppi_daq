@@ -68,6 +68,65 @@ int get_block_size(char * header_buf, size_t len)
     return blocsize;
 }
 
+int get_cur_pktidx(char * header_buf, size_t len)
+{
+    int i;
+    char bs_str[32];
+    int pktidx = 0;
+    //Read header loop over the 80-byte records
+    for (i=0; i<len; i += 80) {
+        if(!strncmp(header_buf+i, "PKTIDX", 6)) {
+            strncpy(bs_str,header_buf+i+16, 32);
+            pktidx = strtoul(bs_str,NULL,0);
+            break;
+        }
+    }
+    return pktidx;
+}
+
+int get_nxt_pktidx(int fdin, int blocsize, char * header_buf, size_t len)
+{
+    int i;
+    int rv;
+    char bs_str[32];
+    int pktidx = 0;
+    // Go to start of next block
+    lseek(fdin, blocsize, SEEK_CUR);
+
+    rv = read(fdin, header_buf, MAX_HDR_SIZE);
+    if (rv == -1) {
+        hashpipe_error("hpguppi_rawfile_input_thread", "error reading file");
+    } else if (rv > 0) {
+        //Read header loop over the 80-byte records
+        for (i=0; i<len; i += 80) {
+            if(!strncmp(header_buf+i, "PKTIDX", 6)) {
+                strncpy(bs_str,header_buf+i+16, 32);
+                pktidx = strtoul(bs_str,NULL,0);
+                break;
+            }
+        }
+    }
+    // Reset to the previous block
+    lseek(fdin,-1*(blocsize+MAX_HDR_SIZE),SEEK_CUR);
+    return pktidx;
+}
+
+int get_piperblk(char * header_buf, size_t len)
+{
+    int i;
+    char bs_str[32];
+    int piperblk = 0;
+    //Read header loop over the 80-byte records
+    for (i=0; i<len; i += 80) {
+        if(!strncmp(header_buf+i, "PIPERBLK", 6)) {
+            strncpy(bs_str,header_buf+i+16, 32);
+            piperblk = strtoul(bs_str,NULL,0);
+            break;
+        }
+    }
+    return piperblk;
+}
+
 void set_output_path(char * header_buf, char * outdir, size_t len)
 {
     int i;
@@ -112,6 +171,9 @@ static void *run(hashpipe_thread_args_t * args)
     int block_idx = 0;
     int block_count=0, filenum=0;
     int blocsize;
+    int piperblk;
+    int cur_pktidx;
+    int nxt_pktidx;
     char *ptr;
 
     //Filenames and paths
@@ -122,6 +184,7 @@ static void *run(hashpipe_thread_args_t * args)
 
     char cur_fname[200] = {0};
     char tmp_fname[200] = {0};
+    char indir[200] = {0};
     strcpy(tmp_fname, "tmp_fname"); // Initialize as different string that cur_fname
     char *base_pos;
     long int period_pos;
@@ -131,6 +194,7 @@ static void *run(hashpipe_thread_args_t * args)
     /* Init output file descriptor (-1 means no file open) */
     static int fdin = -1;
     char header_buf[MAX_HDR_SIZE];
+    char nxt_header_buf[MAX_HDR_SIZE];
     int open_flags = O_RDONLY;
     int directio = 0;
     int sim_flag = 0; // Set to 1 if you'd like to use simulated data rather than the payload from the RAW file
@@ -177,28 +241,47 @@ static void *run(hashpipe_thread_args_t * args)
 #endif
         //Read raw files
         if (fdin == -1) { //no file opened
-            
             // If there is no file ready at the beginning of processing then wait for it to be written to the buffer.
-            // Aware of the fact that "while(True) with a break under an if statement" is considered bad practice, but 
-            // it makes the most sense waiting for an arbitrary file to show up. 
-            while(1){
+            while(strlen(cur_fname) == 0){
                 hashpipe_status_lock_safe(&st);
                 hgets(st.buf, "RAWFILE", sizeof(cur_fname), cur_fname);
                 hashpipe_status_unlock_safe(&st);
-                // If a '...0000.raw' file exists, that is different from the previous '...0000.raw' file
-                if ((strlen(cur_fname) != 0) && (tmp_fname != cur_fname)){
-                    strcpy(tmp_fname, cur_fname); // Save this file name for comparison on the next iteration
-                    printf("Got current RAW file: %s\n", cur_fname);
-                    base_pos = strchr(cur_fname, '.'); // Finds the first occurence of a period in the filename
-                    period_pos = base_pos-cur_fname;
-                    printf("The last position of . is %ld \n", period_pos);
-                    memcpy(basefilename, cur_fname, period_pos); // Copy base filename portion of file name to tmp_basefilename variable
-                    hputs(st.buf, "BASEFILE", basefilename);
-                    printf("RAW INPUT: Base filename from command: %s \n", basefilename);
-                    break;
-                }
             }
-            
+            // Check to see if RAWFILE is an absolute path
+            if(cur_fname[0] != '/'){
+                // If it's not an absolute path, make it so
+                // So wait for the directory of the RAW files. Get it from shared memory
+                while(strlen(indir) == 0){
+                    hashpipe_status_lock_safe(&st);
+                    hgets(st.buf, "INPUTDIR", sizeof(indir), indir); // Don't have a name for this keyword yet, just going with 'INPUTDIR' for now
+                    hashpipe_status_unlock_safe(&st);
+                    // Ensure there's a slash at the end of the path
+                    if((strlen(indir) != 0) && (indir[(strlen(indir)-1)] != '/')){
+                        strcat(indir, "/");
+                    }
+                    if(strlen(indir) != 0){
+                        strcat(indir, cur_fname); // Concatenate the directory and filename
+                        strcpy(cur_fname, indir); // Use cur_fname as the current file name variable moving forward
+                    }
+                }
+                printf("RAW INPUT: Got current RAW file: %s\n", cur_fname);
+            }
+            // Now create the basefilename
+            // If a '...0000.raw' file exists, that is different from the previous '...0000.raw' file
+            if (tmp_fname != cur_fname){
+                strcpy(tmp_fname, cur_fname); // Save this file name for comparison on the next iteration
+                printf("RAW INPUT: Got current RAW file: %s\n", cur_fname);
+                base_pos = strchr(cur_fname, '.'); // Finds the first occurence of a period in the filename
+                period_pos = base_pos-cur_fname;
+                printf("RAW INPUT: The last position of . is %ld \n", period_pos);
+                memcpy(basefilename, cur_fname, period_pos); // Copy base filename portion of file name to tmp_basefilename variable
+                hputs(st.buf, "BASEFILE", basefilename);
+                printf("RAW INPUT: Base filename from command: %s \n", basefilename);
+            }
+            else{
+                // The RAW file hasn't changed so wait for new file to show up in the buffer
+                continue;
+            }
             sprintf(fname, "%s.%04d.raw", basefilename, filenum);
             
             printf("RAW INPUT: Opening first raw file '%s'\n", fname);
@@ -246,6 +329,20 @@ static void *run(hashpipe_thread_args_t * args)
         ptr = hpguppi_databuf_data(db, block_idx);
         lseek(fdin, headersize-MAX_HDR_SIZE, SEEK_CUR);
         blocsize = get_block_size(header_buf, MAX_HDR_SIZE);
+
+        piperblk = get_piperblk(header_buf, MAX_HDR_SIZE);
+        cur_pktidx = get_cur_pktidx(header_buf, MAX_HDR_SIZE);
+        nxt_pktidx = get_nxt_pktidx(fdin, blocsize, header_buf, MAX_HDR_SIZE);
+        // Check to see whether there will be any following blocks that are missed
+        // If the next packet index is greater than the current pkt idx + piperblk, then N blocks were missed
+        // So replace with zero blocks
+        if(nxt_pktidx > (cur_pktidx+piperblk)){
+            // Assuming piperblk is the number of packets per block
+            // And PKTIDX is the index of the first packet in a block
+            n_missed_blks = (nxt_pktidx - cur_pktidx)/piperblk;
+            zero_blk_flag = 1;
+        }
+
         if(block_count == 0){
             blocks_per_file = raw_size/(blocsize+headersize); // Number of blocks in the current RAW file
             printf("RAW INPUT: Block 0 RAW file size: %ld, and  n. blocks: %ld \n", raw_size, raw_size/(blocsize+headersize));
@@ -262,8 +359,8 @@ static void *run(hashpipe_thread_args_t * args)
 	if(sim_flag == 0){
             // If a block is missing, copy a block of zeros to the buffer in it's place
             // Otherwise, write the data from a block to the buffer
-
-	    read_blocsize = read(fdin, ptr, blocsize);
+            
+            read_blocsize = read(fdin, ptr, blocsize);
             if(block_count == 0){
                 printf("RAW INPUT: Number of bytes read in read(): %zd \n", read_blocsize);
             }
