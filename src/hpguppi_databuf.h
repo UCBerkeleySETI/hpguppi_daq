@@ -17,6 +17,7 @@
 #define BLOCK_HDR_SIZE  (5*80*512)      // in bytes, from guppi_daq_server
 #define BLOCK_DATA_SIZE (128*1024*1024) // in bytes, from guppi_daq_server
 #define N_FILE 64 // Number of RAW files per processing period or in the NVMe buffer i.e. Number of files to be processed before acquiring data again
+#define MAX_BLKS_PER_FILE 128 // Maximum number of blocks in a RAW file
 
 typedef struct hpguppi_input_block {
   char hdr[BLOCK_HDR_SIZE];

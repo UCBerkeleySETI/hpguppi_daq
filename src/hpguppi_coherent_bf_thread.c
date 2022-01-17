@@ -132,7 +132,7 @@ static void *run(hashpipe_thread_args_t * args)
   int64_t pktidx=0, pktstart=0, pktstop=0;
   int blocksize=0; // Size of beamformer output (output block size)
   int curblock=0;
-  int block_count=0, blocks_per_file=128, filenum=0, next_filenum=0;
+  int block_count=0, filenum=0, next_filenum=0;
   int got_packet_0=0, first=1;
   char *ptr;
   int open_flags = 0;
@@ -158,7 +158,6 @@ static void *run(hashpipe_thread_args_t * args)
   fb_hdr.ibeam  =  -1; //Not used
   fb_hdr.nbits  = 32;
   fb_hdr.nifs   = 1;
-
 
   // Timing variables
   float bf_time = 0;
@@ -619,7 +618,7 @@ static void *run(hashpipe_thread_args_t * args)
     }
 
     /* See if we need to open next file */
-    if (block_count >= blocks_per_file) {
+    if (block_count >= MAX_BLKS_PER_FILE) {
       filenum++;
       if(filenum >= N_FILE){
         filenum = 0;
@@ -715,7 +714,7 @@ static void *run(hashpipe_thread_args_t * args)
       time_taken_w = (float)(tval_after_w.tv_sec - tval_before_w.tv_sec); //*1e6; // Time in seconds since epoch
       time_taken_w = time_taken_w + (float)(tval_after_w.tv_nsec - tval_before_w.tv_nsec)*1e-9; // Time in nanoseconds since 'tv_sec - start and end'
       write_time = time_taken_w;
-      printf("CBF: Time taken to write block of size, %d bytes, to disk = %f s \n", blocksize, write_time);
+      printf("CBF: Time taken to write block of size, %d bytes, to disk = %f s \n", N_BEAM*blocksize, write_time);
       
       printf("CBF: After write() function! Block index = %d \n", block_count);
 

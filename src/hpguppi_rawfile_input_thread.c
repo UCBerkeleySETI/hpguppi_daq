@@ -7,7 +7,6 @@
  * Author: Cherry Ng
  */
 #define MAX_HDR_SIZE (256000)
-#define MAX_BLKS_PER_FILE (128)
 
 #define _GNU_SOURCE 1
 #include <stdio.h>
@@ -68,11 +67,11 @@ int get_block_size(char * header_buf, size_t len)
     return blocsize;
 }
 
-int get_cur_pktidx(char * header_buf, size_t len)
+int64_t get_cur_pktidx(char * header_buf, size_t len)
 {
     int i;
     char bs_str[32];
-    int pktidx = 0;
+    int64_t pktidx = 0;
     //Read header loop over the 80-byte records
     for (i=0; i<len; i += 80) {
         if(!strncmp(header_buf+i, "PKTIDX", 6)) {
@@ -84,12 +83,12 @@ int get_cur_pktidx(char * header_buf, size_t len)
     return pktidx;
 }
 
-int get_nxt_pktidx(int fdin, int blocsize, char * header_buf, size_t len)
+int64_t get_nxt_pktidx(int fdin, int blocsize, char * header_buf, size_t len)
 {
     int i;
     int rv;
     char bs_str[32];
-    int pktidx = 0;
+    int64_t pktidx = 0;
     // Go to start of next block
     lseek(fdin, blocsize, SEEK_CUR);
 
@@ -172,8 +171,12 @@ static void *run(hashpipe_thread_args_t * args)
     int block_count=0, filenum=0;
     int blocsize;
     int piperblk;
-    int cur_pktidx;
-    int nxt_pktidx;
+    int64_t cur_pktidx;
+    int64_t nxt_pktidx;
+    int n_missed_blks = 0;
+    int zero_blk_idx = 0;
+    char *zero_blk;
+    zero_blk = (char*)calloc(N_INPUT, sizeof(char));
     char *ptr;
 
     //Filenames and paths
@@ -193,8 +196,9 @@ static void *run(hashpipe_thread_args_t * args)
     hgets(st.buf, "OUTDIR", sizeof(outdir), outdir);
     /* Init output file descriptor (-1 means no file open) */
     static int fdin = -1;
+    char *header;
     char header_buf[MAX_HDR_SIZE];
-    char nxt_header_buf[MAX_HDR_SIZE];
+    int headersize;
     int open_flags = O_RDONLY;
     int directio = 0;
     int sim_flag = 0; // Set to 1 if you'd like to use simulated data rather than the payload from the RAW file
@@ -203,8 +207,6 @@ static void *run(hashpipe_thread_args_t * args)
     int nt = 8192; 
     sim_data = (char *)simulate_data(n_chan, nt); // Generate block of simulated data
     ssize_t read_blocsize;
-    long int raw_size = 0;
-    long int blocks_per_file = 0;
 #if TIMING
     float read_time = 0;
     float time_taken_r = 0;
@@ -290,98 +292,109 @@ static void *run(hashpipe_thread_args_t * args)
                 hashpipe_error(__FUNCTION__,"Error opening file.");
                 pthread_exit(NULL);
             }
-            // Get size of file to help determine the number of blocks
-            raw_size = lseek(fdin,0,SEEK_END); // Find the end position of file
-            lseek(fdin,0,SEEK_SET); // Reset to the start
         }
 
-        //Handling header - size, output path, directio----------------
+        // If a block is missing, copy a block of zeros to the buffer in it's place
+        // Otherwise, write the data from a block to the buffer
+        if(n_missed_blks == 0){
+            //Handling header - size, output path, directio----------------
 #if VERBOSE
-        printf("RAW INPUT: int headersize= get_header_size(fdin, header_buf, MAX_HDR_SIZE); \n");
+            printf("RAW INPUT: int headersize= get_header_size(fdin, header_buf, MAX_HDR_SIZE); \n");
 #endif
-        int headersize= get_header_size(fdin, header_buf, MAX_HDR_SIZE);
-        set_output_path(header_buf, outdir, MAX_HDR_SIZE);
-
+            headersize= get_header_size(fdin, header_buf, MAX_HDR_SIZE);
+            set_output_path(header_buf, outdir, MAX_HDR_SIZE);
 #if VERBOSE
-	printf("RAW INPUT: char *header = hpguppi_databuf_header(db, block_idx); \n");
+	    printf("RAW INPUT: char *header = hpguppi_databuf_header(db, block_idx); \n");
 #endif
-        char *header = hpguppi_databuf_header(db, block_idx);
-        hashpipe_status_lock_safe(&st);
-        hputs(st.buf, status_key, "receiving");
-        memcpy(header, &header_buf, headersize);
-        hashpipe_status_unlock_safe(&st);
+            header = hpguppi_databuf_header(db, block_idx);
+            hashpipe_status_lock_safe(&st);
+            hputs(st.buf, status_key, "receiving");
+            memcpy(header, &header_buf, headersize);
+            hashpipe_status_unlock_safe(&st);
 
-	//printf("RAW INPUT: directio = hpguppi_read_directio_mode(header); \n");
-        directio = hpguppi_read_directio_mode(header);
+            //printf("RAW INPUT: directio = hpguppi_read_directio_mode(header); \n");
+            directio = hpguppi_read_directio_mode(header);
 
-        // Adjust length for any padding required for DirectIO
-        if(directio) {
-            // Round up to next multiple of 512
-            headersize = (headersize+511) & ~511;
-        }
-
-        //Read data--------------------------------------------------
-	// Start timing read
-#if TIMING
-        struct timespec tval_before, tval_after;
-        clock_gettime(CLOCK_MONOTONIC, &tval_before);
-#endif
-        ptr = hpguppi_databuf_data(db, block_idx);
-        lseek(fdin, headersize-MAX_HDR_SIZE, SEEK_CUR);
-        blocsize = get_block_size(header_buf, MAX_HDR_SIZE);
-
-        piperblk = get_piperblk(header_buf, MAX_HDR_SIZE);
-        cur_pktidx = get_cur_pktidx(header_buf, MAX_HDR_SIZE);
-        nxt_pktidx = get_nxt_pktidx(fdin, blocsize, header_buf, MAX_HDR_SIZE);
-        // Check to see whether there will be any following blocks that are missed
-        // If the next packet index is greater than the current pkt idx + piperblk, then N blocks were missed
-        // So replace with zero blocks
-        if(nxt_pktidx > (cur_pktidx+piperblk)){
-            // Assuming piperblk is the number of packets per block
-            // And PKTIDX is the index of the first packet in a block
-            n_missed_blks = (nxt_pktidx - cur_pktidx)/piperblk;
-            zero_blk_flag = 1;
-        }
-
-        if(block_count == 0){
-            blocks_per_file = raw_size/(blocsize+headersize); // Number of blocks in the current RAW file
-            printf("RAW INPUT: Block 0 RAW file size: %ld, and  n. blocks: %ld \n", raw_size, raw_size/(blocsize+headersize));
-        }
-#if VERBOSE
-        printf("RAW INPUT: Block size: %d, and  BLOCK_DATA_SIZE: %d \n", blocsize, BLOCK_DATA_SIZE);
-        printf("RAW INPUT: header size: %d, and  MAX_HDR_SIZE: %d \n", headersize, MAX_HDR_SIZE);
-        if(block_count == 0){
-            printf("RAW INPUT: Block 0 block size: %d, and  BLOCK_DATA_SIZE: %d \n", blocsize, BLOCK_DATA_SIZE);
-            printf("RAW INPUT: Block 0 header size: %d, and  MAX_HDR_SIZE: %d \n", headersize, MAX_HDR_SIZE);
-            printf("RAW INPUT: Block 0 RAW file size: %ld, and  n. blocks: %ld \n", raw_size, raw_size/(blocsize+headersize));
-        }
-#endif
-	if(sim_flag == 0){
-            // If a block is missing, copy a block of zeros to the buffer in it's place
-            // Otherwise, write the data from a block to the buffer
-            
-            read_blocsize = read(fdin, ptr, blocsize);
-            if(block_count == 0){
-                printf("RAW INPUT: Number of bytes read in read(): %zd \n", read_blocsize);
+            // Adjust length for any padding required for DirectIO
+            if(directio) {
+                // Round up to next multiple of 512
+                headersize = (headersize+511) & ~511;
             }
-#if VERBOSE
-            printf("RAW INPUT: First element of buffer: %d \n", ptr[0]);
-#endif
-        } else{
-	    memcpy(ptr, sim_data, N_INPUT);
-	    //ptr += N_INPUT;
-	}
+
+            //Read data--------------------------------------------------
+	    // Start timing read
 #if TIMING
-	// Stop timing read
-        clock_gettime(CLOCK_MONOTONIC, &tval_after);
-        time_taken_r = (float)(tval_after.tv_sec - tval_before.tv_sec); //*1e6; // Time in seconds since epoch
-        time_taken_r = time_taken_r + (float)(tval_after.tv_nsec - tval_before.tv_nsec)*1e-9; //*1e-6; // Time in nanoseconds since 'tv_sec - start and end'
-        read_time = time_taken_r;
-
-        printf("RAW INPUT: Time taken to read from RAW file = %f ms \n", read_time);
+            struct timespec tval_before, tval_after;
+            clock_gettime(CLOCK_MONOTONIC, &tval_before);
 #endif
+            ptr = hpguppi_databuf_data(db, block_idx);
+            lseek(fdin, headersize-MAX_HDR_SIZE, SEEK_CUR);
+            blocsize = get_block_size(header_buf, MAX_HDR_SIZE);
 
-	//printf("RAW INPUT: hpguppi_input_databuf_set_filled(db, block_idx); \n");
+            // Can only check next block if there is one so make sure one exists
+            if(block_count < MAX_BLKS_PER_FILE-1){
+                piperblk = get_piperblk(header_buf, MAX_HDR_SIZE);
+                cur_pktidx = get_cur_pktidx(header_buf, MAX_HDR_SIZE);
+                nxt_pktidx = get_nxt_pktidx(fdin, blocsize, header_buf, MAX_HDR_SIZE);
+
+                printf("RAW INPUT: Current pktidx = %ld and next pktidx = %ld \n", cur_pktidx, nxt_pktidx);
+                // Check to see whether there will be any following blocks that are missed
+                // If the next packet index is greater than the current pkt idx + piperblk, then N blocks were missed
+                // So replace with zero blocks
+                if(nxt_pktidx > (cur_pktidx+piperblk)){
+                    // Assuming piperblk is the number of packets per block
+                    // And PKTIDX is the index of the first packet in a block
+                    n_missed_blks = (nxt_pktidx - cur_pktidx)/piperblk;
+                }
+            }
+
+#if VERBOSE
+            printf("RAW INPUT: Block size: %d, and  BLOCK_DATA_SIZE: %d \n", blocsize, BLOCK_DATA_SIZE);
+            printf("RAW INPUT: header size: %d, and  MAX_HDR_SIZE: %d \n", headersize, MAX_HDR_SIZE);
+#endif
+	    if(sim_flag == 0){
+                read_blocsize = read(fdin, ptr, blocsize);
+                if(block_count == 0){
+                    printf("RAW INPUT: Number of bytes read in read(): %zd \n", read_blocsize);
+                }
+#if VERBOSE
+                printf("RAW INPUT: First element of buffer: %d \n", ptr[0]);
+#endif
+            } else{
+	        memcpy(ptr, sim_data, N_INPUT);
+	        //ptr += N_INPUT;
+            }
+#if TIMING
+	    // Stop timing read
+            clock_gettime(CLOCK_MONOTONIC, &tval_after);
+            time_taken_r = (float)(tval_after.tv_sec - tval_before.tv_sec); //*1e6; // Time in seconds since epoch
+            time_taken_r = time_taken_r + (float)(tval_after.tv_nsec - tval_before.tv_nsec)*1e-9; //*1e-6; // Time in nanoseconds since 'tv_sec - start and end'
+            read_time = time_taken_r;
+
+            printf("RAW INPUT: Time taken to read from RAW file = %f ms \n", read_time);
+#endif
+        } else if(n_missed_blks > 0){
+            // Copy the same header info from previous block to zero block in buffer
+            header = hpguppi_databuf_header(db, block_idx);
+            hashpipe_status_lock_safe(&st);
+            hputs(st.buf, status_key, "receiving");
+            memcpy(header, &header_buf, headersize);
+            hashpipe_status_unlock_safe(&st);
+
+            // Copy block of zeros to block in buffer
+            ptr = hpguppi_databuf_data(db, block_idx);
+            memcpy(ptr, zero_blk, N_INPUT);
+            
+            // Increment the blocks by one each time
+            // And check to see that the number of missed blocks has been reached
+            zero_blk_idx += 1;
+            if(zero_blk_idx == n_missed_blks){
+                // Reset the number of missed blocks and block index to 0
+                n_missed_blks = 0;
+                zero_blk_idx = 0;
+            }
+        }
+
         // Mark block as full
         hpguppi_input_databuf_set_filled(db, block_idx);
 
@@ -390,7 +403,7 @@ static void *run(hashpipe_thread_args_t * args)
         block_count++;
 
         /* See if we need to open next file */
-        if (block_count>= blocks_per_file) {
+        if (block_count>= MAX_BLKS_PER_FILE) {
             close(fdin);
             filenum++;
             // Find new basefilename after reading all the ones in the NVMe buffer
