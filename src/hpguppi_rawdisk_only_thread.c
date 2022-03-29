@@ -271,8 +271,12 @@ static void *run(hashpipe_thread_args_t * args)
             if (rv != len) {
                 char msg[100];
                 perror(thread_name);
-                sprintf(msg, "Error writing data (ptr=%p, len=%d, rv=%d)", ptr, len, rv);
+                sprintf(msg, "Error writing header (ptr=%p, len=%d, rv=%d)", ptr, len, rv);
                 hashpipe_error(thread_name, msg);
+		hashpipe_warn(thread_name, "closing output file and exiting");
+		close(fdraw);
+		// Do we need to mark block free even when we are exiting?
+		break;
             }
 
             /* Write data */
@@ -288,6 +292,10 @@ static void *run(hashpipe_thread_args_t * args)
                 perror(thread_name);
                 sprintf(msg, "Error writing data (ptr=%p, len=%d, rv=%d)", ptr, len, rv);
                 hashpipe_error(thread_name, msg);
+		hashpipe_warn(thread_name, "closing output file and exiting");
+		close(fdraw);
+		// Do we need to mark block free even when we are exiting?
+		break;
             }
 
 	    if(!directio) {
