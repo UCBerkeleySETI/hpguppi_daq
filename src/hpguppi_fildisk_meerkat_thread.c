@@ -299,7 +299,7 @@ static void *run(hashpipe_thread_args_t * args)
                 cb_data[i].fb_hdr.rawdatafile[80] = '\0';
 
                 if (ctx->incoherently_sum) {
-                    cb_data[i].fd_ics = open(fname, O_CREAT|O_WRONLY|O_TRUNC|O_SYNC, 0644);
+                    cb_data[i].fd_ics = open(fname, O_CREAT|O_WRONLY|O_TRUNC, 0644);
                     if(cb_data[i].fd_ics == -1) {
                         // If we can't open this output file, we probably won't be able to
                         // open any more output files, so print message and bail out.
@@ -309,7 +309,7 @@ static void *run(hashpipe_thread_args_t * args)
                     }
                     posix_fadvise(cb_data[i].fd_ics, 0, 0, POSIX_FADV_DONTNEED);
                 } else {
-                    cb_data[i].fd = open(fname, O_CREAT|O_WRONLY|O_TRUNC|O_SYNC, 0644);
+                    cb_data[i].fd = open(fname, O_CREAT|O_WRONLY|O_TRUNC, 0644);
                     if(cb_data[i].fd == -1) {
                         hashpipe_error(thread_name,
                             "cannot open filterbank output file, giving up");

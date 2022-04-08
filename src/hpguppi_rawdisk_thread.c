@@ -329,7 +329,7 @@ static void *run(hashpipe_thread_args_t * args)
 		}
             }
             // TODO: check for file exist.
-            open_flags = O_CREAT|O_RDWR|O_SYNC;
+            open_flags = O_CREAT|O_RDWR;
             if(directio) {
               open_flags |= O_DIRECT;
             }
@@ -360,7 +360,7 @@ static void *run(hashpipe_thread_args_t * args)
 	      }
 	      cb_data[i].fb_hdr.rawdatafile[80] = '\0';
 
-	      cb_data[i].fd = open(fname, O_CREAT|O_WRONLY|O_TRUNC|O_SYNC, 0644);
+	      cb_data[i].fd = open(fname, O_CREAT|O_WRONLY|O_TRUNC, 0644);
 	      if(cb_data[i].fd == -1) {
 		// If we can't open this output file, we probably won't be able to
 		// open any more output files, so print message and bail out.
@@ -387,7 +387,7 @@ static void *run(hashpipe_thread_args_t * args)
             char fname[256];
             sprintf(fname, "%s.%4.4d.raw", pf.basefilename, filenum);
             directio = hpguppi_read_directio_mode(ptr);
-            open_flags = O_CREAT|O_RDWR|O_SYNC;
+            open_flags = O_CREAT|O_RDWR;
             if(directio) {
               open_flags |= O_DIRECT;
             }
