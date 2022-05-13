@@ -138,7 +138,11 @@ static void wait_for_block_free(hpguppi_input_databuf_t *db, int block_idx,
 
   while ((rv=hpguppi_input_databuf_wait_free(db, block_idx))
       != HASHPIPE_OK) {
-    if (rv==HASHPIPE_TIMEOUT) {
+    if (!run_threads()) {
+      hashpipe_info(__FUNCTION__,
+          "run_threads() returned false, hashpipe exiting (%s)", __FILE__);
+      pthread_exit(NULL);
+    } else if (rv==HASHPIPE_TIMEOUT) {
       ibvbuf_full = hpguppi_input_databuf_total_status(db);
       sprintf(ibvbuf_status, "%d/%d", ibvbuf_full, db->header.n_block);
       hashpipe_status_lock_safe(st);

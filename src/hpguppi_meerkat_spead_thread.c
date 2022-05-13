@@ -237,7 +237,11 @@ static void wait_for_block_free(const struct block_info * bi,
 
   while ((rv=hpguppi_input_databuf_wait_free(bi->dbout, bi->block_idx_out))
       != HASHPIPE_OK) {
-    if (rv==HASHPIPE_TIMEOUT) {
+    if (!run_threads()) {
+      hashpipe_info(__FUNCTION__,
+          "run_threads() returned false, hashpipe exiting (%s)", __FILE__);
+      pthread_exit(NULL);
+    } else if (rv==HASHPIPE_TIMEOUT) {
       netbuf_full = hpguppi_input_databuf_total_status(bi->dbout);
       sprintf(netbuf_status, "%d/%d", netbuf_full, bi->dbout->header.n_block);
       hashpipe_status_lock_safe(st);
