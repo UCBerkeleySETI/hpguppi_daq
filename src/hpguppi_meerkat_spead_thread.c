@@ -1006,14 +1006,14 @@ int debug_i=0, debug_j=0;
 
   // We compute NETGBPS every block as (bits_processed_net / ns_processed_net)
   // We compute NETPKPS every block as (1e9 * pkts_processed_net / ns_processed_net)
-  float netgbps = 0.0, netpkps = 0.0;
+  double netgbps = 0.0, netpkps = 0.0;
   uint64_t bits_processed_net = 0;
   uint64_t pkts_processed_net = 0;
   uint64_t ns_processed_net = 0;
 
   // We compute PHYSGBPS every second as (bits_processed_phys / ns_processed_phys)
   // We compute PHYSPKPS every second as (1e9 * pkts_processed_phys / ns_processed_phys)
-  float physgbps = 0.0, physpkps = 0.0;
+  double physgbps = 0.0, physpkps = 0.0;
   uint64_t bits_processed_phys = 0;
   uint64_t pkts_processed_phys = 0;
   uint64_t ns_processed_phys = 0;
@@ -1121,7 +1121,7 @@ int debug_i=0, debug_j=0;
         clock_gettime(CLOCK_MONOTONIC, &ts_curr_phys);
         if(ts_prev_phys.tv_sec != 0) {
           ns_processed_phys = ELAPSED_NS(ts_prev_phys, ts_curr_phys);
-          physgbps = ((float)bits_processed_phys) / ns_processed_phys;
+          physgbps = ((double)bits_processed_phys) / ns_processed_phys;
           physpkps = (1e9 * pkts_processed_phys) / ns_processed_phys;
           bits_processed_phys = 0;
           pkts_processed_phys = 0;
@@ -1136,8 +1136,8 @@ int debug_i=0, debug_j=0;
           u64tmp += packet_count; packet_count = 0;
           hputu8(st->buf, "NPKTS", u64tmp);
 
-          hputr4(st->buf, "PHYSGBPS", physgbps);
-          hputr4(st->buf, "PHYSPKPS", physpkps);
+          hputnr8(st->buf, "PHYSGBPS", 3, physgbps);
+          hputnr8(st->buf, "PHYSPKPS", 3, physpkps);
 
           // Update obs_info
           //
@@ -1467,7 +1467,7 @@ fprintf(stderr, "feng_chan    = 0x%016lx\n", feng_spead_info.feng_chan   );
 
         // Update NETGBPS and NETPKPS
         if(ns_processed_net != 0) {
-          netgbps = ((float)bits_processed_net) / ns_processed_net;
+          netgbps = ((double)bits_processed_net) / ns_processed_net;
           netpkps = (1e9 * pkts_processed_net) / ns_processed_net;
           bits_processed_net = 0;
           pkts_processed_net = 0;
@@ -1486,8 +1486,8 @@ fprintf(stderr, "feng_chan    = 0x%016lx\n", feng_spead_info.feng_chan   );
           hgetr8(st->buf, "DWELL", &dwell_seconds);
           hputr8(st->buf, "DWELL", dwell_seconds); // In case it wasn't there
 
-          hputr4(st->buf, "NETGBPS", netgbps);
-          hputr4(st->buf, "NETPKPS", netpkps);
+          hputnr8(st->buf, "NETGBPS", 3, netgbps);
+          hputnr8(st->buf, "NETPKPS", 3, netpkps);
 
           // Get CHAN_BW and calculate/store TBIN
           hgetr8(st->buf, "CHAN_BW", &chan_bw);
