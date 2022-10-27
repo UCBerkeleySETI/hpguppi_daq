@@ -195,6 +195,8 @@ static void *run(hashpipe_thread_args_t * args)
                 printf("Using directory '%s' for output.\n", datadir);
 		if(mkdir_p(datadir, 0755) == -1) {
 		  hashpipe_error(thread_name, "mkdir_p(%s)", datadir);
+		  // Mark as free
+		  hpguppi_input_databuf_set_free(db, curblock);
 		  break;
 		}
             }
@@ -275,7 +277,8 @@ static void *run(hashpipe_thread_args_t * args)
                 hashpipe_error(thread_name, msg);
 		hashpipe_warn(thread_name, "closing output file and exiting");
 		close(fdraw);
-		// Do we need to mark block free even when we are exiting?
+		// Mark as free
+		hpguppi_input_databuf_set_free(db, curblock);
 		break;
             }
 
@@ -294,7 +297,8 @@ static void *run(hashpipe_thread_args_t * args)
                 hashpipe_error(thread_name, msg);
 		hashpipe_warn(thread_name, "closing output file and exiting");
 		close(fdraw);
-		// Do we need to mark block free even when we are exiting?
+		// Mark as free
+		hpguppi_input_databuf_set_free(db, curblock);
 		break;
             }
 
