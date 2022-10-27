@@ -774,6 +774,10 @@ static int init(hashpipe_thread_args_t *args)
     hputr8(st->buf, "TBIN", tbin);
     hputs(st->buf, "OBS_MODE", obs_mode);
     hputi4(st->buf, "NDROP", 0);
+    // Init PKT* values to 0
+    hputu8(st->buf, "PKTIDX", 0);
+    hputu8(st->buf, "PKTSTART", 0);
+    hputu8(st->buf, "PKTSTOP", 0);
     // Set status_key to init
     hputs(st->buf, status_key, "init");
   }
