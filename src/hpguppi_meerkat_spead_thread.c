@@ -1406,8 +1406,10 @@ fflush(stdout);
       p_spead_payload = mk_parse_mkfeng_ibv_spead_packet(
           p_spdpkt, &feng_spead_info);
 
-      // Warn about unexpected payload sizes, and ignore
-      if(feng_spead_info.payload_size != 1024) {
+      // Warn about unexpected payload sizes, and ignore.  1024 is normal
+      // payload, 343 is SPEAD metadata packet that we ignore/don't need.
+      if(feng_spead_info.payload_size != 1024
+      && feng_spead_info.payload_size != 343) {
         hashpipe_warn(thread_name, "unexpected payload size %u",
             feng_spead_info.payload_size);
 #if 0
