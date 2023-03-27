@@ -1156,12 +1156,11 @@ int debug_i=0, debug_j=0;
 
           // If obs_info is valid
           if(mk_obs_info_valid(obs_info)) {
-            // Get FECENTER (used to compute CHAN_BW)
+            // Get FECENTER (used to compute OBSFREQ)
             hgetr8(st->buf, "FECENTER", &fecenter);
 
-            // Calculate CHAN_BW
-            chan_bw = (2 * fecenter)
-                    / (3 * obs_info.fenchan);
+            // Get CHAN_BW (used to compute OBSFREQ and OBSBW)
+            hgetr8(st->buf, "CHAN_BW", &chan_bw);
 
             // Calculate OBSFREQ
             obsfreq =
