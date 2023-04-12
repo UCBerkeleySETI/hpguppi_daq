@@ -96,6 +96,10 @@ static int init(hashpipe_thread_args_t * args)
       ctx->Nas[2] = 2000;
     }
 
+    hashpipe_info(thread_name, "using Ntpb=%u Nt=%u,%u,%u Na=%u,%u,%u",
+	ctx->Ntpb, ctx->Nts[0], ctx->Nts[1], ctx->Nts[2],
+	           ctx->Nas[0], ctx->Nas[1], ctx->Nas[2]);
+
     ctx->dump_callback = rawspec_dump_callback;
 
     // Init user_data to be array of callback data structures
